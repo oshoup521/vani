@@ -1,0 +1,30 @@
+# Environment variables — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+backend/.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
