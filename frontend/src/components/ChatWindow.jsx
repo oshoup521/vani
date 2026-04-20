@@ -56,13 +56,6 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry })
         </div>
       )}
 
-      {/* Wake-up banner — shown if backend hasn't responded in 5 seconds */}
-      {isWakingUp && (
-        <div className="wakeup-banner">
-          Backend is waking up on Render, please wait...
-        </div>
-      )}
-
       {/* Invisible anchor element to scroll into view */}
       <div ref={bottomRef} />
     </div>
