@@ -59,11 +59,20 @@
 html,
 body,
 #root {
-  min-height: 100%;
+  height: 100%;
+}
+
+html {
+  /* Lock the root so only the chat window scrolls, not the whole page */
+  overflow: hidden;
+  /* iOS: paint the safe-area background so the notch/home-indicator strips match the app */
+  background: var(--bg-primary);
 }
 
 body {
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 14px;
   line-height: 1.6;
@@ -73,6 +82,10 @@ body {
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+#root {
+  display: flex;
 }
 
 button,
@@ -88,14 +101,16 @@ button {
   display: flex;
   flex-direction: column;
   width: min(100%, 980px);
-  height: min(100vh, 980px);
-  min-height: 100vh;
+  /* dvh = dynamic viewport height — correctly excludes iOS toolbars/dynamic island */
+  height: 100dvh;
+  max-height: 100dvh;
   margin: 0 auto;
   background: var(--surface);
   border-left: 1px solid var(--border);
   border-right: 1px solid var(--border);
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(22px);
+  overflow: hidden;
 }
 
 .header {
@@ -103,7 +118,11 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 24px;
+  padding:
+    calc(18px + env(safe-area-inset-top))
+    calc(24px + env(safe-area-inset-right))
+    18px
+    calc(24px + env(safe-area-inset-left));
   background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -208,8 +227,15 @@ button {
 
 .chat-window {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 28px 24px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding:
+    28px
+    calc(24px + env(safe-area-inset-right))
+    28px
+    calc(24px + env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -440,7 +466,11 @@ button {
 
 .chat-input-bar {
   flex-shrink: 0;
-  padding: 16px 24px 20px;
+  padding:
+    16px
+    calc(24px + env(safe-area-inset-right))
+    calc(20px + env(safe-area-inset-bottom))
+    calc(24px + env(safe-area-inset-left));
   background: color-mix(in srgb, var(--surface-strong) 82%, transparent);
   border-top: 1px solid var(--border);
 }
@@ -590,7 +620,11 @@ button {
   }
 
   .header {
-    padding: 14px 16px;
+    padding:
+      calc(14px + env(safe-area-inset-top))
+      calc(16px + env(safe-area-inset-right))
+      14px
+      calc(16px + env(safe-area-inset-left));
   }
 
   .header__mark {
@@ -608,7 +642,11 @@ button {
   }
 
   .chat-window {
-    padding: 22px 14px;
+    padding:
+      22px
+      calc(14px + env(safe-area-inset-right))
+      22px
+      calc(14px + env(safe-area-inset-left));
     gap: 18px;
   }
 
@@ -617,7 +655,11 @@ button {
   }
 
   .chat-input-bar {
-    padding: 12px 14px 14px;
+    padding:
+      12px
+      calc(14px + env(safe-area-inset-right))
+      calc(14px + env(safe-area-inset-bottom))
+      calc(14px + env(safe-area-inset-left));
   }
 
   .chat-input-inner {

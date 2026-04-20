@@ -32,13 +32,24 @@ app.add_middleware(
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
-# Fallback chain — OpenRouter's `models` array is capped at 3 entries.
-# Chosen for quality + low traffic (less rate-limit pressure).
-FALLBACK_MODELS = [
-    "google/gemma-4-31b-it:free",             # 1st: newest Gemma 4, 262K ctx
-    "nvidia/nemotron-3-super-120b-a12b:free", # 2nd: large MoE, underused
-    "qwen/qwen3-next-80b-a3b-instruct:free",  # 3rd: Qwen3 quality, MoE efficient
+# Full pool of free models, ordered by quality + low traffic (less rate-limit pressure).
+# We chunk this into groups of 3 because OpenRouter's `models` array is capped at 3.
+# On each request, we try group 1 (server-side fallback inside OpenRouter).
+# If all 3 are rate-limited, we fall back to group 2, and so on.
+MODEL_POOL = [
+    "google/gemma-4-31b-it:free",              # Gemma 4, 262K ctx
+    "nvidia/nemotron-3-super-120b-a12b:free",  # Nemotron 3, large MoE
+    "qwen/qwen3-next-80b-a3b-instruct:free",   # Qwen3, MoE efficient
+    "z-ai/glm-4.5-air:free",                   # GLM 4.5 Air
+    "deepseek/deepseek-chat-v3.1:free",        # DeepSeek V3
+    "meta-llama/llama-3.3-70b-instruct:free",  # Llama 3.3 70B
+    "mistralai/mistral-small-3.2-24b-instruct:free",  # Mistral Small 3.2
+    "google/gemma-3-27b-it:free",              # Gemma 3 fallback
+    "meta-llama/llama-3.1-8b-instruct:free",   # Llama 3.1 8B (last resort — spec default)
 ]
+
+# OpenRouter caps the server-side `models` array at 3 per request
+MODELS_PER_REQUEST = 3
 
 
 # --- Pydantic Models ---
@@ -127,13 +138,47 @@ async def list_free_models():
 
 # --- Chat Route ---
 
+async def try_models_batch(client: httpx.AsyncClient, models: list, messages_payload: list, headers: dict):
+    """
+    Sends one request to OpenRouter with a ranked `models` list (max 3).
+    OpenRouter handles fallback server-side across those 3. Returns
+    (reply, model_used) on success, or None if every model in this batch failed.
+    """
+    body = {"models": models, "messages": messages_payload}
+
+    try:
+        response = await client.post(OPENROUTER_API_URL, headers=headers, json=body)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reach OpenRouter: {str(e)}")
+
+    # Retryable across batches: 429 (rate limit), 503 (unavailable)
+    if response.status_code in (429, 503):
+        print(f"[fallback] batch {models} returned {response.status_code}, trying next batch...")
+        return None
+
+    if response.status_code >= 400:
+        print(f"[fallback] batch {models} returned {response.status_code}: {response.text}")
+        return None
+
+    data = response.json()
+    if "error" in data:
+        print(f"[fallback] batch {models} responded with error body: {data['error']}")
+        return None
+
+    try:
+        return data["choices"][0]["message"]["content"], data.get("model")
+    except (KeyError, IndexError):
+        print(f"[fallback] batch {models} returned unexpected format: {data}")
+        return None
+
+
 @app.post("/chat")
 async def chat(request: ChatRequest):
     """
-    Sends the full conversation to OpenRouter with a ranked list of models.
-    OpenRouter handles fallback server-side: if the first model is rate-limited
-    or down, it reroutes internally to the next one before replying — so the
-    whole fallback chain costs us one network round-trip instead of N.
+    Tries the model pool in batches of 3 (OpenRouter's server-side fallback
+    limit). Each batch is one round-trip; inside it OpenRouter handles the
+    3-way fallback internally. If a whole batch is rate-limited, we try the
+    next batch. This gives us a deep pool without paying N round-trips.
     """
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
@@ -148,36 +193,15 @@ async def chat(request: ChatRequest):
         "X-Title": "Vani",
     }
 
-    body = {
-        "models": FALLBACK_MODELS,
-        "messages": messages_payload,
-    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for i in range(0, len(MODEL_POOL), MODELS_PER_REQUEST):
+            batch = MODEL_POOL[i : i + MODELS_PER_REQUEST]
+            result = await try_models_batch(client, batch, messages_payload, headers)
+            if result is not None:
+                reply, model_used = result
+                return {"reply": reply, "model_used": model_used}
 
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(OPENROUTER_API_URL, headers=headers, json=body)
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to reach OpenRouter: {str(e)}")
-
-    if response.status_code >= 400:
-        raise HTTPException(
-            status_code=response.status_code if response.status_code < 600 else 500,
-            detail=f"OpenRouter error {response.status_code}: {response.text}",
-        )
-
-    data = response.json()
-
-    # OpenRouter can return 200 with an error body when every model in the list failed
-    if "error" in data:
-        raise HTTPException(
-            status_code=503,
-            detail=f"All fallback models failed: {data['error']}",
-        )
-
-    try:
-        reply = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError):
-        raise HTTPException(status_code=500, detail=f"Unexpected OpenRouter response: {data}")
-
-    # OpenRouter tells us which model actually served the request
-    return {"reply": reply, "model_used": data.get("model")}
+    raise HTTPException(
+        status_code=503,
+        detail=f"All {len(MODEL_POOL)} models are rate-limited or unavailable right now.",
+    )
