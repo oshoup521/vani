@@ -47,11 +47,12 @@ MODEL_POOL = [
     "openrouter/qwen/qwen-2.5-72b-instruct:free",
     "openrouter/mistralai/mistral-small-3.2-24b-instruct:free",
     "openrouter/meta-llama/llama-3.1-8b-instruct:free",
-    # Optional providers — only hit if their API key is set in env.
+    # Optional free-tier providers — only hit if their API key is set in env.
     # LiteLLM raises AuthenticationError if the key is missing, which we treat
     # as a skip (same as a rate-limit) and move on to the next model.
     "groq/llama-3.3-70b-versatile",
-    "gemini/gemini-1.5-flash",
+    "gemini/gemini-2.0-flash",
+    "cerebras/llama-3.3-70b",
 ]
 
 # HTTP-Referer / X-Title headers OpenRouter expects for attribution
