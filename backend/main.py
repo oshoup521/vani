@@ -32,13 +32,12 @@ app.add_middleware(
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
-# Fallback chain — tried in order until one succeeds.
+# Fallback chain — OpenRouter's `models` array is capped at 3 entries.
 # Chosen for quality + low traffic (less rate-limit pressure).
 FALLBACK_MODELS = [
-    "google/gemma-4-31b-it:free",            # 1st choice: newest Gemma 4, 262K ctx
+    "google/gemma-4-31b-it:free",             # 1st: newest Gemma 4, 262K ctx
     "nvidia/nemotron-3-super-120b-a12b:free", # 2nd: large MoE, underused
     "qwen/qwen3-next-80b-a3b-instruct:free",  # 3rd: Qwen3 quality, MoE efficient
-    "z-ai/glm-4.5-air:free",                  # 4th: obscure provider, almost no traffic
 ]
 
 
