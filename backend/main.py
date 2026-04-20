@@ -128,54 +128,13 @@ async def list_free_models():
 
 # --- Chat Route ---
 
-async def try_model(client: httpx.AsyncClient, model: str, messages_payload: list, headers: dict) -> str | None:
-    """
-    Attempts to get a reply from a single OpenRouter model.
-    Returns the reply string on success, or None if the model is rate-limited
-    or returns a non-retryable error. Raises immediately on network failures.
-    """
-    body = {
-        "model": model,
-        "messages": messages_payload,
-    }
-
-    try:
-        response = await client.post(OPENROUTER_API_URL, headers=headers, json=body)
-    except httpx.RequestError as e:
-        # Network-level failure — no point retrying other models for this
-        raise HTTPException(status_code=500, detail=f"Failed to reach OpenRouter: {str(e)}")
-
-    # 429 = rate limited, 503 = model unavailable — both are retryable with next model
-    if response.status_code in (429, 503):
-        print(f"[fallback] {model} returned {response.status_code}, trying next model...")
-        return None
-
-    # Any other HTTP error is treated as a hard failure
-    if response.status_code >= 400:
-        print(f"[fallback] {model} returned {response.status_code}: {response.text}")
-        return None
-
-    # Parse the reply out of the successful response
-    data = response.json()
-
-    # OpenRouter sometimes returns 200 but with an error object inside
-    if "error" in data:
-        print(f"[fallback] {model} responded with error body: {data['error']}")
-        return None
-
-    try:
-        return data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError):
-        print(f"[fallback] {model} returned unexpected format: {data}")
-        return None
-
-
 @app.post("/chat")
 async def chat(request: ChatRequest):
     """
-    Receives the full conversation history from the frontend and tries
-    each model in FALLBACK_MODELS in order until one succeeds.
-    Returns the assistant's reply text and which model answered.
+    Sends the full conversation to OpenRouter with a ranked list of models.
+    OpenRouter handles fallback server-side: if the first model is rate-limited
+    or down, it reroutes internally to the next one before replying — so the
+    whole fallback chain costs us one network round-trip instead of N.
     """
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
@@ -190,15 +149,36 @@ async def chat(request: ChatRequest):
         "X-Title": "Vani",
     }
 
-    # Walk through the fallback chain and return the first successful reply
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        for model in FALLBACK_MODELS:
-            reply = await try_model(client, model, messages_payload, headers)
-            if reply is not None:
-                return {"reply": reply, "model_used": model}
+    body = {
+        "models": FALLBACK_MODELS,
+        "messages": messages_payload,
+    }
 
-    # All models exhausted
-    raise HTTPException(
-        status_code=503,
-        detail=f"All models are currently rate-limited or unavailable. Tried: {FALLBACK_MODELS}"
-    )
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(OPENROUTER_API_URL, headers=headers, json=body)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reach OpenRouter: {str(e)}")
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=response.status_code if response.status_code < 600 else 500,
+            detail=f"OpenRouter error {response.status_code}: {response.text}",
+        )
+
+    data = response.json()
+
+    # OpenRouter can return 200 with an error body when every model in the list failed
+    if "error" in data:
+        raise HTTPException(
+            status_code=503,
+            detail=f"All fallback models failed: {data['error']}",
+        )
+
+    try:
+        reply = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError):
+        raise HTTPException(status_code=500, detail=f"Unexpected OpenRouter response: {data}")
+
+    # OpenRouter tells us which model actually served the request
+    return {"reply": reply, "model_used": data.get("model")}

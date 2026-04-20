@@ -24,8 +24,11 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry })
       {/* Empty state — shown before the first message */}
       {messages.length === 0 && !isLoading && (
         <div className="empty-state">
-          <div className="empty-state__icon">💬</div>
-          <div className="empty-state__text">Ask me anything to get started</div>
+          <div className="empty-state__icon" aria-hidden="true">
+            <span />
+          </div>
+          <h1 className="empty-state__title">Start a conversation</h1>
+          <div className="empty-state__text">Ask Vani anything to get a clear, focused answer.</div>
         </div>
       )}
 

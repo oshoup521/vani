@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import ChatWindow from './components/ChatWindow.jsx'
 import ChatInput from './components/ChatInput.jsx'
 
@@ -6,18 +6,56 @@ import ChatInput from './components/ChatInput.jsx'
 // In local dev, set this in frontend/.env (copy from .env.example).
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-// Header component — displays the app name and tagline
-function Header() {
+function getInitialTheme() {
+  const savedTheme = localStorage.getItem('vani-theme')
+  if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme
+
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+}
+
+// Header component - displays the app name, tagline, and theme switcher
+function Header({ theme, onToggleTheme }) {
+  const isDark = theme === 'dark'
+
   return (
     <header className="header">
-      <span className="header__title">Vani</span>
-      <span className="header__tagline">Speak. Ask. Know.</span>
+      <div className="header__brand">
+        <span className="header__mark" aria-hidden="true">V</span>
+        <div>
+          <span className="header__title">Vani</span>
+          <span className="header__tagline">Speak. Ask. Know.</span>
+        </div>
+      </div>
+
+      <button
+        className="theme-toggle"
+        type="button"
+        onClick={onToggleTheme}
+        aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+        title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+      >
+        <span className="theme-toggle__track" aria-hidden="true">
+          <span className="theme-toggle__thumb">
+            {isDark ? (
+              <svg viewBox="0 0 24 24" role="img" focusable="false">
+                <path d="M20 15.3A8.3 8.3 0 0 1 8.7 4a7 7 0 1 0 11.3 11.3Z" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" role="img" focusable="false">
+                <path d="M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0-5 1.1 3h-2.2L12 2Zm0 20-1.1-3h2.2L12 22ZM2 12l3-1.1v2.2L2 12Zm20 0-3 1.1v-2.2L22 12ZM4.2 4.2l2.9 1.3-1.6 1.6-1.3-2.9Zm15.6 15.6-2.9-1.3 1.6-1.6 1.3 2.9Zm0-15.6-1.3 2.9-1.6-1.6 2.9-1.3ZM4.2 19.8l1.3-2.9 1.6 1.6-2.9 1.3Z" />
+              </svg>
+            )}
+          </span>
+        </span>
+      </button>
     </header>
   )
 }
 
 // Root App component — owns all shared state and the sendMessage logic
 export default function App() {
+  const [theme, setTheme] = useState(getInitialTheme)
+
   // messages: array of { role: "user" | "assistant", content: string, isError?: bool }
   const [messages, setMessages] = useState([])
 
@@ -30,6 +68,16 @@ export default function App() {
 
   // lastUserMessage: kept so the retry button can re-send after an error
   const [lastUserMessage, setLastUserMessage] = useState(null)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    document.documentElement.style.colorScheme = theme
+    localStorage.setItem('vani-theme', theme)
+  }, [theme])
+
+  function toggleTheme() {
+    setTheme((currentTheme) => currentTheme === 'dark' ? 'light' : 'dark')
+  }
 
   /**
    * sendMessage — sends the full conversation history to the backend
@@ -153,7 +201,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Header />
+      <Header theme={theme} onToggleTheme={toggleTheme} />
       <ChatWindow
         messages={messages}
         isLoading={isLoading}

@@ -52,7 +52,7 @@ export default function ChatInput({ onSend, disabled }) {
           ref={textareaRef}
           className="chat-input-textarea"
           rows={1}
-          placeholder="Type a message… (Enter to send, Shift+Enter for new line)"
+          placeholder="Type a message..."
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -66,7 +66,9 @@ export default function ChatInput({ onSend, disabled }) {
           disabled={disabled || !value.trim()}
           aria-label="Send message"
         >
-          ➤
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 12 20 4l-5 16-3.2-6.8L4 12Zm8.8-.9 1.2 2.5 1.8-5.4-5.6 2.8 2.6.1Z" />
+          </svg>
         </button>
       </div>
     </div>
