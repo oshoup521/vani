@@ -85,6 +85,19 @@ export default function App() {
    *
    * @param {string} userText - the new user message text
    */
+  async function postChat(payload) {
+    const response = await fetch(`${API_URL}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.detail || `Server error: ${response.status}`)
+    }
+    return response.json()
+  }
+
   async function sendMessage(userText) {
     const userMsg = { role: 'user', content: userText }
     const nextMessages = [...messages, userMsg]
@@ -97,21 +110,19 @@ export default function App() {
     // If backend hasn't responded in 5s, show the waking-up banner
     const wakeupTimer = setTimeout(() => setIsWakingUp(true), 5000)
 
+    // Transparent retry: Render free tier cold-starts and the first model in
+    // the pool occasionally times out. One silent retry turns a user-visible
+    // error into a slightly longer wait.
+    let data
     try {
-      const response = await fetch(`${API_URL}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: nextMessages }),
-      })
-
-      clearTimeout(wakeupTimer)
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.detail || `Server error: ${response.status}`)
+      try {
+        data = await postChat({ messages: nextMessages })
+      } catch (firstErr) {
+        await new Promise((r) => setTimeout(r, 800))
+        data = await postChat({ messages: nextMessages })
       }
 
-      const data = await response.json()
+      clearTimeout(wakeupTimer)
       const assistantMsg = {
         role: 'assistant',
         content: data.reply,
@@ -120,7 +131,6 @@ export default function App() {
       setMessages([...nextMessages, assistantMsg])
     } catch (err) {
       clearTimeout(wakeupTimer)
-      // Append an error bubble so the user can see what went wrong and retry
       const errorMsg = {
         role: 'assistant',
         content: `Something went wrong: ${err.message}`,
@@ -163,37 +173,32 @@ export default function App() {
 
       const wakeupTimer = setTimeout(() => setIsWakingUp(true), 5000)
 
-      fetch(`${API_URL}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: nextMessages }),
-      })
-        .then(async (res) => {
-          clearTimeout(wakeupTimer)
-          if (!res.ok) {
-            const errorData = await res.json().catch(() => ({}))
-            throw new Error(errorData.detail || `Server error: ${res.status}`)
+      ;(async () => {
+        try {
+          let data
+          try {
+            data = await postChat({ messages: nextMessages })
+          } catch (firstErr) {
+            await new Promise((r) => setTimeout(r, 800))
+            data = await postChat({ messages: nextMessages })
           }
-          return res.json()
-        })
-        .then((data) => {
+          clearTimeout(wakeupTimer)
           setMessages([...nextMessages, {
             role: 'assistant',
             content: data.reply,
             modelUsed: data.model_used || null,
           }])
-        })
-        .catch((err) => {
+        } catch (err) {
           clearTimeout(wakeupTimer)
           setMessages([
             ...nextMessages,
             { role: 'assistant', content: `Something went wrong: ${err.message}`, isError: true },
           ])
-        })
-        .finally(() => {
+        } finally {
           setIsLoading(false)
           setIsWakingUp(false)
-        })
+        }
+      })()
 
       return nextMessages // keep state consistent during the async call
     })

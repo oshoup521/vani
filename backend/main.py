@@ -90,7 +90,7 @@ async def chat(request: ChatRequest):
         kwargs = {
             "model": model,
             "messages": messages_payload,
-            "timeout": 30,
+            "timeout": 12,
         }
         if model.startswith("openrouter/"):
             kwargs["extra_headers"] = OPENROUTER_EXTRA_HEADERS
@@ -98,6 +98,10 @@ async def chat(request: ChatRequest):
         try:
             response = await acompletion(**kwargs)
             reply = response["choices"][0]["message"]["content"]
+            # Some free providers return HTTP 200 with empty content when
+            # throttled. Treat that as a failure and fall through.
+            if not reply or not reply.strip():
+                raise ValueError("empty reply")
             return {"reply": reply, "model_used": model}
         except Exception as e:
             # Skip on any failure (rate limit, missing key, provider down, etc.)
