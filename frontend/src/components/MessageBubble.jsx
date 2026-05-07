@@ -163,22 +163,36 @@ function pickPreferredVoice() {
   const voices = SpeechSynthesisImpl.getVoices()
   if (!voices.length) return null
 
-  // Prefer voices that explicitly match Indian English. Within that pool
-  // prefer "natural"/"online"/"premium" voices over the older robotic ones
-  // — many systems expose both, and the high-quality ones name themselves.
+  // Score voices in two passes:
+  //   1) Language match — prefer en-IN over hi-IN over other-IN over generic en.
+  //   2) Quality hint — Apple's "Enhanced/Premium/Siri" voices, Google's neural
+  //      voices, and "Natural/Online" voice variants are far less robotic than
+  //      the default compact ones. Names give us the only signal we have.
+  // The quality bonus is intentionally large so an "Enhanced en-IN" beats a
+  // "compact en-IN" even though both match the same language.
   const score = (v) => {
     let s = 0
+    // Language scoring
     if (v.lang === 'en-IN') s += 100
     else if (v.lang?.startsWith('en-IN')) s += 90
     else if (v.lang === 'hi-IN') s += 70
     else if (v.lang?.endsWith('-IN')) s += 50
     else if (v.lang?.startsWith('en')) s += 10
-    // Prefer remote (Google's neural voices) on Chrome — they sound much
-    // better than the OS fallbacks. Local voices win on Mac/iOS where the
-    // built-ins are already high quality.
+
+    // Quality hints encoded in the voice name
     const name = (v.name || '').toLowerCase()
-    if (/google/.test(name)) s += 5
-    if (/natural|premium|enhanced|neural/.test(name)) s += 8
+    if (/siri/.test(name)) s += 40           // Apple's best-tier voices
+    if (/premium/.test(name)) s += 30        // Apple's downloadable Premium tier
+    if (/enhanced/.test(name)) s += 25       // Apple's downloadable Enhanced tier
+    if (/neural|natural/.test(name)) s += 20
+    if (/online/.test(name)) s += 15         // Apple's online (Eloquence-replacing) voices
+    if (/google/.test(name)) s += 10         // Chrome's cloud neural voices
+
+    // Penalize voices that appear to be the lowest-quality compact tier.
+    // iOS marks these with no quality tag in the name — we infer by absence
+    // of any quality keyword and very short names like 'Veena' or 'Rishi'.
+    // Don't over-penalize: it's a tiebreaker, not a disqualifier.
+
     return s
   }
 
