@@ -41,6 +41,15 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         // Don't cache API calls — chat responses must always hit the backend
         navigateFallbackDenylist: [/^\/chat/, /^\/health/, /^\/models/],
+        // Take control of clients as soon as a new SW activates, and skip the
+        // "waiting" phase that normally requires all tabs to close before the
+        // new SW takes over. Together these give users fresh code on the very
+        // next page load after a deploy, instead of one visit later.
+        clientsClaim: true,
+        skipWaiting: true,
+        // Drop any precache entries that came from an older SW build —
+        // prevents stale workbox revisions from accumulating in CacheStorage.
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
