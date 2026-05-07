@@ -159,13 +159,39 @@ export default function App() {
       })
     }
 
-    const appendDelta = (chunk) => {
+    // Coalesce streaming tokens with requestAnimationFrame so we render at
+    // most once per frame (~60 fps) instead of once per token (which on
+    // Groq is 30–80 tokens/sec). Without this, ReactMarkdown + KaTeX +
+    // SyntaxHighlighter re-parse the full message on every token, causing
+    // visible layout jitter.
+    let pendingChunk = ''
+    let flushScheduled = false
+
+    const flushPending = () => {
+      flushScheduled = false
+      if (!pendingChunk) return
+      const chunk = pendingChunk
+      pendingChunk = ''
       setMessages((prev) => {
         const next = [...prev]
         const current = next[assistantIndex]
         next[assistantIndex] = { ...current, content: current.content + chunk }
         return next
       })
+    }
+
+    const appendDelta = (chunk) => {
+      pendingChunk += chunk
+      if (!flushScheduled) {
+        flushScheduled = true
+        requestAnimationFrame(flushPending)
+      }
+    }
+
+    // Force a final flush after the stream completes so the last few tokens
+    // (which may arrive too late for an rAF tick) actually render.
+    const finalFlush = () => {
+      if (pendingChunk) flushPending()
     }
 
     let firstTokenSeen = false
@@ -216,6 +242,9 @@ export default function App() {
         return next
       })
     } finally {
+      // Flush any tokens that were buffered between the last rAF tick and
+      // stream end, so the final words actually appear.
+      finalFlush()
       clearTimeout(wakeupTimer)
       setIsLoading(false)
       setIsWakingUp(false)

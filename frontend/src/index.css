@@ -331,13 +331,11 @@ button {
   background: var(--accent-soft);
 }
 
-/* Touch devices have no real :hover, so reveal copy buttons by default.
-   Selectors are doubled (.code-block .code-block__copy) to out-specificity
-   the .code-block:hover .code-block__copy rule, which can spuriously fire
-   on mobile from sticky-hover behavior after a tap. */
+/* Touch devices have no real :hover, so reveal the message-level copy
+   button by default. The code-block copy button lives in a permanent
+   header bar and is always visible — no override needed. */
 @media (hover: none) {
-  .message .message-copy-btn,
-  .code-block .code-block__copy {
+  .message .message-copy-btn {
     opacity: 1;
   }
 }
@@ -462,47 +460,62 @@ button {
      pushes the .code-block wider than its parent bubble. */
   min-width: 0;
   max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  /* No background here — SyntaxHighlighter's theme paints its own. */
+  overflow: hidden; /* clip the rounded corners against the inner <pre> */
 }
 
-.code-block > pre {
-  margin: 0;
-  /* Belt-and-braces: ensure the <pre> itself is the horizontal scroll
-     container. overflow-x: auto is already set on .markdown pre above, but
-     repeat it here so it survives if anyone restyles .markdown later. */
+.code-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 8px 5px 12px;
+  background: var(--surface-muted);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.code-block__lang {
+  font-family: 'Fira Code', 'Consolas', 'Courier New', monospace;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.code-block__pre {
+  /* SyntaxHighlighter renders its own <pre> with its theme's background and
+     padding (set via customStyle in MessageBubble.jsx). We override the
+     generic .markdown pre rule so the chrome doesn't double up. */
+  margin: 0 !important;
   max-width: 100%;
   overflow-x: auto;
+  border: none !important;
+  border-radius: 0 !important;
 }
 
 .code-block__copy {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 1;
-  background: var(--surface-strong);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-tertiary);
   font-family: inherit;
   font-size: 11px;
   font-weight: 500;
-  padding: 3px 9px;
-  border-radius: 6px;
+  padding: 2px 8px;
+  border-radius: 5px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
-}
-
-.code-block:hover .code-block__copy,
-.code-block__copy:focus-visible {
-  opacity: 1;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .code-block__copy:hover {
   color: var(--text-primary);
   border-color: var(--border-strong);
+  background: var(--surface-strong);
 }
 
 .code-block__copy--copied {
-  opacity: 1;
   color: var(--accent);
   border-color: var(--accent-soft);
   background: var(--accent-soft);
@@ -519,6 +532,61 @@ button {
   border: none;
   border-top: 1px solid var(--border);
   margin: 12px 0;
+}
+
+/* GFM tables — render with light borders, zebra striping, and scroll
+   horizontally inside the bubble if too wide for the viewport. */
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 13px;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--surface-muted);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.markdown tr:nth-child(even) td {
+  background: var(--surface-muted);
+}
+
+/* GFM task lists — strip the bullet, line up the checkbox with the text. */
+.markdown li.task-list-item {
+  list-style: none;
+  margin-left: -20px;
+}
+
+.markdown li.task-list-item input[type="checkbox"] {
+  margin-right: 8px;
+  vertical-align: middle;
+  accent-color: var(--accent);
+}
+
+/* GFM strikethrough — react-markdown emits <del>. */
+.markdown del {
+  color: var(--text-tertiary);
+}
+
+/* KaTeX display equations can overflow on narrow screens. Allow horizontal
+   scroll inside the bubble rather than blowing out the layout. */
+.markdown .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  padding: 4px 0;
 }
 
 .markdown a {
@@ -673,6 +741,66 @@ button {
   opacity: 0.42;
   cursor: not-allowed;
   transform: none;
+}
+
+.mic-btn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.mic-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+.mic-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.mic-btn:focus-visible {
+  outline: 3px solid var(--accent-soft);
+  outline-offset: 3px;
+}
+
+.mic-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+/* Recording state — solid accent fill + a pulsing ring to make it obvious
+   that the mic is hot. */
+.mic-btn--recording {
+  background: var(--error);
+  border-color: var(--error);
+  color: #ffffff;
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+.mic-btn--recording:hover:not(:disabled) {
+  background: var(--error);
+  border-color: var(--error);
+  color: #ffffff;
+}
+
+@keyframes mic-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 var(--error-bg);
+  }
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+  }
 }
 
 .empty-state {

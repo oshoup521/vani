@@ -40,17 +40,27 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry })
         </div>
       )}
 
-      {/* Render each message bubble */}
-      {messages.map((msg, index) => (
-        <MessageBubble
-          key={index}
-          role={msg.role}
-          content={msg.content}
-          isError={msg.isError}
-          modelUsed={msg.modelUsed}
-          onRetry={msg.isError ? onRetry : undefined}
-        />
-      ))}
+      {/* Render each message bubble. The last assistant bubble during a
+          loading turn is the streaming target; flag it so the bubble can
+          disable streaming-incompatible features (like text-to-speech). */}
+      {messages.map((msg, index) => {
+        const isStreaming =
+          isLoading &&
+          index === messages.length - 1 &&
+          msg.role === 'assistant' &&
+          !msg.isError
+        return (
+          <MessageBubble
+            key={index}
+            role={msg.role}
+            content={msg.content}
+            isError={msg.isError}
+            modelUsed={msg.modelUsed}
+            isStreaming={isStreaming}
+            onRetry={msg.isError ? onRetry : undefined}
+          />
+        )
+      })}
 
       {/* Typing indicator — shown until the streaming bubble appears */}
       {showTypingIndicator && (
