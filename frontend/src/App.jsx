@@ -80,13 +80,13 @@ export default function App() {
   }
 
   /**
-   * sendMessage — sends the full conversation history to the backend
-   * and appends the assistant's reply to the messages state.
-   *
-   * @param {string} userText - the new user message text
+   * streamChat — opens an SSE stream against /chat/stream and invokes
+   * `onEvent` for each parsed event ({type: "model"|"delta"|"done"|"error", ...}).
+   * Resolves when the stream ends; throws on transport errors or terminal
+   * `error` events that arrive *before* any tokens.
    */
-  async function postChat(payload) {
-    const response = await fetch(`${API_URL}/chat`, {
+  async function streamChat(payload, onEvent) {
+    const response = await fetch(`${API_URL}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -95,112 +95,160 @@ export default function App() {
       const errorData = await response.json().catch(() => ({}))
       throw new Error(errorData.detail || `Server error: ${response.status}`)
     }
-    return response.json()
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let receivedAny = false
+
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      // SSE events are separated by a blank line. Each event has one or more
+      // `data: ...` lines we need to concatenate before JSON-parsing.
+      let sep
+      while ((sep = buffer.indexOf('\n\n')) !== -1) {
+        const rawEvent = buffer.slice(0, sep)
+        buffer = buffer.slice(sep + 2)
+
+        const dataLines = rawEvent
+          .split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart())
+        if (dataLines.length === 0) continue
+
+        let parsed
+        try {
+          parsed = JSON.parse(dataLines.join('\n'))
+        } catch {
+          continue
+        }
+
+        if (parsed.type === 'error' && !receivedAny) {
+          throw new Error(parsed.message || 'Stream error')
+        }
+        if (parsed.type === 'delta') receivedAny = true
+        onEvent(parsed)
+      }
+    }
   }
 
-  async function sendMessage(userText) {
-    const userMsg = { role: 'user', content: userText }
-    const nextMessages = [...messages, userMsg]
-
-    setMessages(nextMessages)
-    setLastUserMessage(userText)
+  /**
+   * runStreamingTurn — shared flow for both first-send and retry. Appends an
+   * empty assistant placeholder, then mutates it in place as SSE deltas arrive.
+   */
+  async function runStreamingTurn(history) {
     setIsLoading(true)
     setIsWakingUp(false)
 
-    // If backend hasn't responded in 5s, show the waking-up banner
+    // If backend hasn't started streaming in 5s, show the waking-up banner
     const wakeupTimer = setTimeout(() => setIsWakingUp(true), 5000)
 
-    // Transparent retry: Render free tier cold-starts and the first model in
-    // the pool occasionally times out. One silent retry turns a user-visible
-    // error into a slightly longer wait.
-    let data
+    // Append an empty assistant bubble we'll fill as tokens arrive. Tracking
+    // by index works because nothing else mutates messages during a turn.
+    const assistantIndex = history.length
+    setMessages([...history, { role: 'assistant', content: '', modelUsed: null }])
+
+    const updateAssistant = (patch) => {
+      setMessages((prev) => {
+        const next = [...prev]
+        next[assistantIndex] = { ...next[assistantIndex], ...patch }
+        return next
+      })
+    }
+
+    const appendDelta = (chunk) => {
+      setMessages((prev) => {
+        const next = [...prev]
+        const current = next[assistantIndex]
+        next[assistantIndex] = { ...current, content: current.content + chunk }
+        return next
+      })
+    }
+
+    let firstTokenSeen = false
+    let midStreamError = null
+
     try {
+      // Transparent retry only applies before the first token. Once tokens
+      // start flowing we keep whatever we got rather than restarting.
+      const attempt = () =>
+        streamChat({ messages: history }, (event) => {
+          if (event.type === 'model') {
+            updateAssistant({ modelUsed: event.model })
+          } else if (event.type === 'delta') {
+            if (!firstTokenSeen) {
+              firstTokenSeen = true
+              clearTimeout(wakeupTimer)
+              setIsWakingUp(false)
+            }
+            appendDelta(event.content)
+          } else if (event.type === 'error') {
+            // Only reachable mid-stream — pre-token errors throw inside streamChat.
+            midStreamError = event.message
+          }
+        })
+
       try {
-        data = await postChat({ messages: nextMessages })
+        await attempt()
       } catch (firstErr) {
+        if (firstTokenSeen) throw firstErr
         await new Promise((r) => setTimeout(r, 800))
-        data = await postChat({ messages: nextMessages })
+        await attempt()
       }
 
-      clearTimeout(wakeupTimer)
-      const assistantMsg = {
-        role: 'assistant',
-        content: data.reply,
-        modelUsed: data.model_used || null,
+      if (midStreamError) {
+        // Stream cut off after partial output — append a note rather than
+        // wiping what the user already saw.
+        appendDelta(`\n\n_(stream interrupted: ${midStreamError})_`)
       }
-      setMessages([...nextMessages, assistantMsg])
     } catch (err) {
-      clearTimeout(wakeupTimer)
-      const errorMsg = {
-        role: 'assistant',
-        content: `Something went wrong: ${err.message}`,
-        isError: true,
-      }
-      setMessages([...nextMessages, errorMsg])
+      // No tokens ever arrived — replace the empty placeholder with an error bubble.
+      setMessages((prev) => {
+        const next = [...prev]
+        next[assistantIndex] = {
+          role: 'assistant',
+          content: `Something went wrong: ${err.message}`,
+          isError: true,
+        }
+        return next
+      })
     } finally {
+      clearTimeout(wakeupTimer)
       setIsLoading(false)
       setIsWakingUp(false)
     }
   }
 
+  async function sendMessage(userText) {
+    const userMsg = { role: 'user', content: userText }
+    const nextMessages = [...messages, userMsg]
+    setMessages(nextMessages)
+    setLastUserMessage(userText)
+    await runStreamingTurn(nextMessages)
+  }
+
   /**
-   * handleRetry — removes the last error bubble and re-sends the last user message.
+   * handleRetry — strips the trailing error bubble (and its triggering user
+   * message) and re-runs the turn with the last user text.
    */
   function handleRetry() {
     if (!lastUserMessage) return
-    // Strip the trailing error bubble before retrying
     setMessages((prev) => {
-      const withoutError = prev.filter((_, i) => {
-        // Remove the last message if it was an error
-        if (i === prev.length - 1 && prev[i].isError) return false
-        return true
-      })
-      return withoutError
-    })
-    // Re-send using the messages without the last user message
-    // (sendMessage will re-append it)
-    setMessages((prev) => {
-      const withoutLastUser = prev.slice(0, -1) // remove last user msg too
-      // We call sendMessage after state update via a small trick:
-      // use the trimmed history directly
-      const history = withoutLastUser
-      const userMsg = { role: 'user', content: lastUserMessage }
-      const nextMessages = [...history, userMsg]
-
-      setMessages(nextMessages)
-      setIsLoading(true)
-      setIsWakingUp(false)
-
-      const wakeupTimer = setTimeout(() => setIsWakingUp(true), 5000)
-
-      ;(async () => {
-        try {
-          let data
-          try {
-            data = await postChat({ messages: nextMessages })
-          } catch (firstErr) {
-            await new Promise((r) => setTimeout(r, 800))
-            data = await postChat({ messages: nextMessages })
-          }
-          clearTimeout(wakeupTimer)
-          setMessages([...nextMessages, {
-            role: 'assistant',
-            content: data.reply,
-            modelUsed: data.model_used || null,
-          }])
-        } catch (err) {
-          clearTimeout(wakeupTimer)
-          setMessages([
-            ...nextMessages,
-            { role: 'assistant', content: `Something went wrong: ${err.message}`, isError: true },
-          ])
-        } finally {
-          setIsLoading(false)
-          setIsWakingUp(false)
-        }
-      })()
-
-      return nextMessages // keep state consistent during the async call
+      // Drop trailing error bubble + the user message that produced it
+      let trimmed = prev
+      if (trimmed.length && trimmed[trimmed.length - 1].isError) {
+        trimmed = trimmed.slice(0, -1)
+      }
+      if (trimmed.length && trimmed[trimmed.length - 1].role === 'user') {
+        trimmed = trimmed.slice(0, -1)
+      }
+      const nextMessages = [...trimmed, { role: 'user', content: lastUserMessage }]
+      // Kick off the streaming turn after state settles
+      runStreamingTurn(nextMessages)
+      return nextMessages
     })
   }
 

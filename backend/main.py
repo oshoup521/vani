@@ -13,9 +13,11 @@ Deployment (Render):
   - Free tier spins down after inactivity — frontend handles the wake-up state
 """
 
+import json
 import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List
 import litellm
@@ -41,18 +43,22 @@ app.add_middleware(
 # provider based on the prefix (openrouter/, groq/, together_ai/, gemini/).
 # Order = priority. First one that responds wins.
 MODEL_POOL = [
-    "openrouter/google/gemma-3-27b-it:free",
-    "openrouter/deepseek/deepseek-chat-v3.1:free",
-    "openrouter/meta-llama/llama-3.3-70b-instruct:free",
-    "openrouter/qwen/qwen-2.5-72b-instruct:free",
-    "openrouter/mistralai/mistral-small-3.2-24b-instruct:free",
-    "openrouter/meta-llama/llama-3.1-8b-instruct:free",
-    # Optional free-tier providers — only hit if their API key is set in env.
-    # LiteLLM raises AuthenticationError if the key is missing, which we treat
-    # as a skip (same as a rate-limit) and move on to the next model.
+    # Groq first — currently the most reliable free tier in the pool.
     "groq/llama-3.3-70b-versatile",
+    # OpenRouter free tier — IDs verified live against /api/v1/models.
+    # Free model IDs churn often; if you see repeated 404s here, refresh from
+    # https://openrouter.ai/api/v1/models (filter for ":free" suffix).
+    # OpenRouter's free pool is shared across all users and routinely 429s
+    # upstream, so we treat it as a fallback rather than primary.
+    "openrouter/google/gemma-4-31b-it:free",
+    "openrouter/qwen/qwen3-next-80b-a3b-instruct:free",
+    "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+    "openrouter/openai/gpt-oss-120b:free",
+    "openrouter/z-ai/glm-4.5-air:free",
+    "openrouter/meta-llama/llama-3.2-3b-instruct:free",
+    # Other free-tier providers — only hit if their API key is set in env.
+    "cerebras/llama3.1-8b",
     "gemini/gemini-2.0-flash",
-    "cerebras/llama-3.3-70b",
 ]
 
 # HTTP-Referer / X-Title headers OpenRouter expects for attribution
@@ -99,6 +105,16 @@ SAMPLING_PARAMS = {
     "frequency_penalty": 0.3,
 }
 
+# Sliding-window context budget. We send at most this many tokens of *history*
+# (system prompt is added on top and not counted here). 6000 leaves headroom
+# for the system prompt + the model's reply within an 8k-context model and
+# stays well under Groq's 12k-tokens-per-minute bucket.
+MAX_HISTORY_TOKENS = 6000
+
+# Cap on number of historical turns regardless of token count, as a safety net
+# in case our char-based token estimate underestimates badly (e.g. CJK text).
+MAX_HISTORY_TURNS = 40
+
 
 class Message(BaseModel):
     role: str
@@ -107,6 +123,58 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[Message]
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token count without a tokenizer dependency. ~4 chars/token is a
+    standard heuristic for English; over-estimates slightly for code, which
+    is the safe direction for budget calculations."""
+    return max(1, len(text) // 4)
+
+
+def trim_history(messages: List[Message]) -> List[dict]:
+    """
+    Returns a windowed copy of `messages` that fits within MAX_HISTORY_TOKENS
+    and MAX_HISTORY_TURNS. Walks newest→oldest, keeps messages until we'd
+    exceed the budget, then stops. Drops user/assistant in pairs at the boundary
+    so we never keep an assistant reply without its triggering user message.
+
+    The most recent user message is always preserved even if it alone exceeds
+    the budget — otherwise we'd have nothing to send.
+    """
+    if not messages:
+        return []
+
+    msgs = [{"role": m.role, "content": m.content} for m in messages]
+
+    # Always keep the most recent message (the new user turn). Walk backwards
+    # from the second-to-last, accumulating until we hit a limit.
+    kept_reversed = [msgs[-1]]
+    budget = estimate_tokens(msgs[-1]["content"])
+
+    for msg in reversed(msgs[:-1]):
+        cost = estimate_tokens(msg["content"])
+        if budget + cost > MAX_HISTORY_TOKENS:
+            break
+        if len(kept_reversed) >= MAX_HISTORY_TURNS:
+            break
+        kept_reversed.append(msg)
+        budget += cost
+
+    kept = list(reversed(kept_reversed))
+
+    # Don't start the window with an orphan assistant message — the model would
+    # see a reply with no question. If the oldest kept message is an assistant
+    # turn, drop it.
+    if kept and kept[0]["role"] == "assistant":
+        kept = kept[1:]
+
+    return kept
+
+
+def build_payload(messages: List[Message]) -> List[dict]:
+    """System prompt + windowed history. Used by both /chat and /chat/stream."""
+    return [{"role": "system", "content": SYSTEM_PROMPT}] + trim_history(messages)
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
@@ -121,12 +189,7 @@ async def chat(request: ChatRequest):
     the right provider's API. On rate limit / auth / transient error we move
     to the next model. If all fail, return 503.
     """
-    # Prepend the shared system prompt so every model answers in the same voice.
-    # If the client ever sends its own system message, we keep ours first and
-    # let theirs follow — most providers concatenate them.
-    messages_payload = [{"role": "system", "content": SYSTEM_PROMPT}] + [
-        {"role": m.role, "content": m.content} for m in request.messages
-    ]
+    messages_payload = build_payload(request.messages)
 
     last_error = None
     for model in MODEL_POOL:
@@ -156,4 +219,82 @@ async def chat(request: ChatRequest):
     raise HTTPException(
         status_code=503,
         detail=f"All {len(MODEL_POOL)} models failed. Last error: {last_error}",
+    )
+
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    Streaming variant of /chat. Walks MODEL_POOL and, for each model, opens a
+    streaming completion. Fallback only applies *before* the first token —
+    once a model has emitted any content we commit to it. Errors after that
+    point are surfaced as a final SSE `error` event so the client can show
+    them inline rather than swapping providers mid-reply.
+
+    Wire format: Server-Sent Events. Each line is `data: <json>\\n\\n` where
+    json is one of:
+      { "type": "model", "model": "<model id>" }   — sent once, before tokens
+      { "type": "delta", "content": "<chunk>" }    — token chunk
+      { "type": "done" }                            — normal end of stream
+      { "type": "error", "message": "<msg>" }       — terminal error
+    """
+    messages_payload = build_payload(request.messages)
+
+    async def event_generator():
+        last_error = None
+        for model in MODEL_POOL:
+            kwargs = {
+                "model": model,
+                "messages": messages_payload,
+                "timeout": 12,
+                "stream": True,
+                **SAMPLING_PARAMS,
+            }
+            if model.startswith("openrouter/"):
+                kwargs["extra_headers"] = OPENROUTER_EXTRA_HEADERS
+
+            committed = False
+            try:
+                stream = await acompletion(**kwargs)
+                async for chunk in stream:
+                    delta = (
+                        chunk["choices"][0].get("delta", {}).get("content")
+                        if chunk.get("choices")
+                        else None
+                    )
+                    if not delta:
+                        continue
+                    if not committed:
+                        committed = True
+                        yield f"data: {json.dumps({'type': 'model', 'model': model})}\n\n"
+                    yield f"data: {json.dumps({'type': 'delta', 'content': delta})}\n\n"
+
+                if not committed:
+                    # Stream ended without producing anything — treat as failure
+                    # and try the next model.
+                    raise ValueError("empty stream")
+
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
+            except Exception as e:
+                print(f"[fallback] {model} stream failed: {type(e).__name__}: {e}")
+                last_error = e
+                # Only fall through if we never committed. If we did commit,
+                # the exception happened mid-stream — re-raise as an SSE error
+                # so the client keeps whatever tokens it already rendered.
+                if committed:
+                    yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                    return
+                continue
+
+        msg = f"All {len(MODEL_POOL)} models failed. Last error: {last_error}"
+        yield f"data: {json.dumps({'type': 'error', 'message': msg})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable proxy buffering on Render/nginx
+        },
     )

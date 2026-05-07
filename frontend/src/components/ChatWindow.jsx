@@ -19,6 +19,14 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry })
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
 
+  // During a streaming turn, an empty assistant bubble is appended immediately
+  // and fills as tokens arrive. We show the standalone typing indicator only
+  // when there's no such placeholder yet (e.g. between turns or right at start).
+  const last = messages[messages.length - 1]
+  const hasStreamingPlaceholder =
+    last && last.role === 'assistant' && !last.isError
+  const showTypingIndicator = isLoading && !hasStreamingPlaceholder
+
   return (
     <div className="chat-window">
       {/* Empty state — shown before the first message */}
@@ -44,8 +52,8 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry })
         />
       ))}
 
-      {/* Typing indicator — shown while waiting for the backend response */}
-      {isLoading && (
+      {/* Typing indicator — shown until the streaming bubble appears */}
+      {showTypingIndicator && (
         <div className="message message--assistant">
           <span className="message__label">AI</span>
           <div className="typing-indicator">
