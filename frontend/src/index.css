@@ -331,10 +331,13 @@ button {
   background: var(--accent-soft);
 }
 
-/* Touch devices have no :hover, so reveal copy buttons by default. */
+/* Touch devices have no real :hover, so reveal copy buttons by default.
+   Selectors are doubled (.code-block .code-block__copy) to out-specificity
+   the .code-block:hover .code-block__copy rule, which can spuriously fire
+   on mobile from sticky-hover behavior after a tap. */
 @media (hover: none) {
-  .message-copy-btn,
-  .code-block__copy {
+  .message .message-copy-btn,
+  .code-block .code-block__copy {
     opacity: 1;
   }
 }
@@ -346,6 +349,21 @@ button {
   word-break: break-word;
   white-space: pre-wrap;
   box-shadow: var(--shadow-card);
+  /* Prevent wide code blocks / long unbreakable strings from forcing the
+     bubble (and the whole page) wider than the viewport. min-width: 0 lets
+     the bubble shrink below its intrinsic content width; overflow-wrap
+     handles long URLs and tokens in normal prose. */
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* Markdown wrapper inside an assistant bubble — also needs min-width: 0 so
+   the <pre> overflow-x: auto rule actually engages instead of being forced
+   wider by its <code> children. */
+.markdown {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .message--assistant .message__bubble {
@@ -440,11 +458,19 @@ button {
 .code-block {
   position: relative;
   margin: 8px 0;
+  /* Same shrinkability fix as .markdown — without these, a wide <pre> child
+     pushes the .code-block wider than its parent bubble. */
+  min-width: 0;
+  max-width: 100%;
 }
 
-.code-block .markdown pre,
 .code-block > pre {
   margin: 0;
+  /* Belt-and-braces: ensure the <pre> itself is the horizontal scroll
+     container. overflow-x: auto is already set on .markdown pre above, but
+     repeat it here so it survives if anyone restyles .markdown later. */
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .code-block__copy {
