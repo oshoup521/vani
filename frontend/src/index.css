@@ -331,6 +331,14 @@ button {
   background: var(--accent-soft);
 }
 
+/* Touch devices have no :hover, so reveal copy buttons by default. */
+@media (hover: none) {
+  .message-copy-btn,
+  .code-block__copy {
+    opacity: 1;
+  }
+}
+
 .message__bubble {
   padding: 13px 16px;
   border-radius: 14px;
