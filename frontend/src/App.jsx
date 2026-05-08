@@ -57,8 +57,8 @@ function serializeForStorage(messages) {
   return serialized.length > MAX_STORED_BYTES ? null : serialized
 }
 
-// Header component - displays the app name, tagline, and theme switcher
-function Header({ theme, onToggleTheme }) {
+// Header component - displays the app name, tagline, theme switcher, and new chat button
+function Header({ theme, onToggleTheme, onNewChat, hasMessages }) {
   const isDark = theme === 'dark'
 
   return (
@@ -71,27 +71,44 @@ function Header({ theme, onToggleTheme }) {
         </div>
       </div>
 
-      <button
-        className="theme-toggle"
-        type="button"
-        onClick={onToggleTheme}
-        aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`}
-        title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
-      >
-        <span className="theme-toggle__track" aria-hidden="true">
-          <span className="theme-toggle__thumb">
-            {isDark ? (
-              <svg viewBox="0 0 24 24" role="img" focusable="false">
-                <path d="M20 15.3A8.3 8.3 0 0 1 8.7 4a7 7 0 1 0 11.3 11.3Z" />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 24 24" role="img" focusable="false">
-                <path d="M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0-5 1.1 3h-2.2L12 2Zm0 20-1.1-3h2.2L12 22ZM2 12l3-1.1v2.2L2 12Zm20 0-3 1.1v-2.2L22 12ZM4.2 4.2l2.9 1.3-1.6 1.6-1.3-2.9Zm15.6 15.6-2.9-1.3 1.6-1.6 1.3 2.9Zm0-15.6-1.3 2.9-1.6-1.6 2.9-1.3ZM4.2 19.8l1.3-2.9 1.6 1.6-2.9 1.3Z" />
-              </svg>
-            )}
+      <div className="header__actions">
+        {hasMessages && (
+          <button
+            className="new-chat-btn"
+            type="button"
+            onClick={onNewChat}
+            aria-label="Start new chat"
+            title="Start new chat"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            New chat
+          </button>
+        )}
+
+        <button
+          className="theme-toggle"
+          type="button"
+          onClick={onToggleTheme}
+          aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+          title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+        >
+          <span className="theme-toggle__track" aria-hidden="true">
+            <span className="theme-toggle__thumb">
+              {isDark ? (
+                <svg viewBox="0 0 24 24" role="img" focusable="false">
+                  <path d="M20 15.3A8.3 8.3 0 0 1 8.7 4a7 7 0 1 0 11.3 11.3Z" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" role="img" focusable="false">
+                  <path d="M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0-5 1.1 3h-2.2L12 2Zm0 20-1.1-3h2.2L12 22ZM2 12l3-1.1v2.2L2 12Zm20 0-3 1.1v-2.2L22 12ZM4.2 4.2l2.9 1.3-1.6 1.6-1.3-2.9Zm15.6 15.6-2.9-1.3 1.6-1.6 1.3 2.9Zm0-15.6-1.3 2.9-1.6-1.6 2.9-1.3ZM4.2 19.8l1.3-2.9 1.6 1.6-2.9 1.3Z" />
+                </svg>
+              )}
+            </span>
           </span>
-        </span>
-      </button>
+        </button>
+      </div>
     </header>
   )
 }
@@ -156,6 +173,17 @@ export default function App() {
 
   function toggleTheme() {
     setTheme((currentTheme) => currentTheme === 'dark' ? 'light' : 'dark')
+  }
+
+  function newChat() {
+    if (!window.confirm('Start a new chat? This will clear the current conversation.')) return
+    abortRef.current?.abort()
+    setMessages([])
+    setLastUserMessage(null)
+    setIsLoading(false)
+    setIsWakingUp(false)
+    setDroppedFiles(null)
+    localStorage.removeItem(MESSAGES_STORAGE_KEY)
   }
 
   /**
@@ -423,7 +451,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Header theme={theme} onToggleTheme={toggleTheme} />
+      <Header theme={theme} onToggleTheme={toggleTheme} onNewChat={newChat} hasMessages={messages.length > 0} />
       <ChatWindow
         messages={messages}
         isLoading={isLoading}

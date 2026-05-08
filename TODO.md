@@ -53,10 +53,10 @@ The highest-ROI work, ordered by what should happen next.
 
 ## Tier 1 — Quick wins (XS-S)
 
-- [ ] **"New chat" button** `XS`
-  - [ ] Header button or menu item
-  - [ ] Confirm dialog before clearing
-  - [ ] Resets messages, lastUserMessage, error state
+- [x] **"New chat" button** `XS` — done 2026-05-08
+  - [x] Header button or menu item — done 2026-05-08
+  - [x] Confirm dialog before clearing — done 2026-05-08
+  - [x] Resets messages, lastUserMessage, error state — done 2026-05-08
 - [ ] **Regenerate response** `S`
   - [ ] "↻" button on assistant messages
   - [ ] Truncate messages to before the reply, re-run turn
@@ -248,4 +248,4 @@ These look attractive but are intentionally off the roadmap. Document the reason
 - Add new items to the appropriate tier as they emerge. Don't let the doc go stale — update on every release.
 - When an item moves between tiers (e.g. Tier 4 → Tier 1 because a user asked for it), note the date and reason inline.
 
-_Last updated: 2026-05-08 (multimodal image upload)_
+_Last updated: 2026-05-08 (new chat button)_
