@@ -467,6 +467,62 @@ function InlineEditor({ initialText, onSave, onCancel }) {
   )
 }
 
+// Maps substrings found in raw error messages to a short friendly explanation.
+// Checked in order — first match wins.
+const ERROR_PATTERNS = [
+  { test: /429|rate.?limit|too many requests/i,   friendly: "The AI provider is rate-limiting us right now. Try again in a moment." },
+  { test: /503|all.*models failed|pool exhausted/i, friendly: "All AI models are temporarily unavailable. Try again shortly." },
+  { test: /401|403|auth|api.?key/i,               friendly: "Authentication failed — the server API key may be missing or expired." },
+  { test: /timeout|timed out|ETIMEDOUT/i,          friendly: "The request timed out. The server may be starting up — try again." },
+  { test: /network|fetch|ECONNREFUSED|ENOTFOUND/i, friendly: "Can't reach the server. Check your connection or try again later." },
+  { test: /empty.?reply|empty.?stream/i,           friendly: "The model returned an empty response. Try regenerating." },
+  { test: /vision|image|multimodal/i,              friendly: "No vision-capable model is available right now. Try without images." },
+]
+
+function friendlyMessage(raw) {
+  for (const { test, friendly } of ERROR_PATTERNS) {
+    if (test.test(raw)) return friendly
+  }
+  return "Something went wrong on our end. You can retry or start a new chat."
+}
+
+/**
+ * ErrorBubble — replaces the raw error string with a structured error UI:
+ * friendly message, collapsible raw details, and a Retry button.
+ */
+function ErrorBubble({ rawError, onRetry }) {
+  const [open, setOpen] = useState(false)
+  const friendly = friendlyMessage(rawError)
+
+  return (
+    <div className="error-bubble">
+      <div className="error-bubble__icon" aria-hidden="true">⚠</div>
+      <div className="error-bubble__body">
+        <p className="error-bubble__message">{friendly}</p>
+
+        <button
+          type="button"
+          className="error-bubble__details-toggle"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          {open ? 'Hide details ▲' : 'Show details ▼'}
+        </button>
+
+        {open && (
+          <pre className="error-bubble__raw">{rawError}</pre>
+        )}
+
+        {onRetry && (
+          <button type="button" className="retry-btn" onClick={onRetry}>
+            ↺ Retry
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /**
  * MessageBubble — renders a single chat message.
  * Assistant messages are rendered as Markdown; user messages are plain text.
@@ -487,7 +543,7 @@ function InlineEditor({ initialText, onSave, onCancel }) {
 function MessageBubble({
   role, content, images, isError, modelUsed, isStreaming,
   isEditable, isEditing, onEditStart, onEditSave, onEditCancel,
-  onRetry,
+  onRetry, onRegenerate,
 }) {
   const roleClass = role === 'user' ? 'message--user' : 'message--assistant'
   const errorClass = isError ? 'message--error' : ''
@@ -522,6 +578,8 @@ function MessageBubble({
           onSave={onEditSave}
           onCancel={onEditCancel}
         />
+      ) : isError ? (
+        <ErrorBubble rawError={textContent} onRetry={onRetry} />
       ) : (
         <div className="message__bubble">
           {role === 'assistant' ? (
@@ -560,15 +618,6 @@ function MessageBubble({
               {textContent && <span>{textContent}</span>}
             </>
           )}
-
-          {/* Retry button — only shown on error bubbles */}
-          {isError && onRetry && (
-            <div>
-              <button className="retry-btn" onClick={onRetry}>
-                Retry
-              </button>
-            </div>
-          )}
         </div>
       )}
 
@@ -586,13 +635,24 @@ function MessageBubble({
           </button>
         </div>
       )}
-      {role === 'assistant' && (modelLabel || showMessageCopy || showSpeak) && (
+      {role === 'assistant' && (modelLabel || showMessageCopy || showSpeak || onRegenerate) && (
         <div className="message__footer">
           {modelLabel && <span className="message__model">via {modelLabel}</span>}
           {showMessageCopy && (
             <CopyButton text={textContent} className="message-copy-btn" label="Copy" />
           )}
           {showSpeak && <SpeakButton text={textContent} />}
+          {onRegenerate && (
+            <button
+              type="button"
+              className="message-copy-btn"
+              onClick={onRegenerate}
+              aria-label="Regenerate response"
+              title="Regenerate response"
+            >
+              ↻ Retry
+            </button>
+          )}
         </div>
       )}
     </div>

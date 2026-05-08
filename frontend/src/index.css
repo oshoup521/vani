@@ -448,6 +448,68 @@ button {
   color: var(--error);
 }
 
+.error-bubble {
+  display: flex;
+  gap: 10px;
+  background: var(--error-bg);
+  border: 1px solid var(--error);
+  border-radius: 14px 14px 14px 4px;
+  padding: 12px 14px;
+  max-width: min(74%, 720px);
+}
+
+.error-bubble__icon {
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--error);
+  flex-shrink: 0;
+}
+
+.error-bubble__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.error-bubble__message {
+  color: var(--error);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.error-bubble__details-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s ease;
+}
+
+.error-bubble__details-toggle:hover {
+  color: var(--error);
+}
+
+.error-bubble__raw {
+  font-family: 'Fira Code', 'Consolas', 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
 .markdown p {
   margin: 0 0 10px;
 }

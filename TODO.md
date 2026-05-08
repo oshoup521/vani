@@ -57,15 +57,16 @@ The highest-ROI work, ordered by what should happen next.
   - [x] Header button or menu item — done 2026-05-08
   - [x] Confirm dialog before clearing — done 2026-05-08
   - [x] Resets messages, lastUserMessage, error state — done 2026-05-08
-- [ ] **Regenerate response** `S`
-  - [ ] "↻" button on assistant messages
-  - [ ] Truncate messages to before the reply, re-run turn
-  - [ ] Replaces existing reply (don't keep both — for now)
-- [ ] **Better error recovery UI** `S`
-  - [ ] New ErrorBubble component
-  - [ ] Provider-error-pattern → friendly-message mapper
-  - [ ] Details expander preserves the raw error
-  - [ ] Retry button reuses existing handleRetry path
+- [x] **Regenerate response** `S` — done 2026-05-08
+  - [x] "↻" button on assistant messages — done 2026-05-08
+  - [x] Truncate messages to before the reply, re-run turn — done 2026-05-08
+  - [x] Replaces existing reply (don't keep both — for now) — done 2026-05-08
+- [x] **Better error recovery UI** `S` — done 2026-05-08
+  - [x] New ErrorBubble component — done 2026-05-08
+  - [x] Provider-error-pattern → friendly-message mapper — done 2026-05-08
+  - [x] Details expander preserves the raw error — done 2026-05-08
+  - [x] Retry button reuses existing handleRetry path — done 2026-05-08
+  - [x] Backend error log (errors.log, git-tracked, rotating) — done 2026-05-08
 - [ ] **Markdown export of conversation** `XS`
   - [ ] "Export as Markdown" menu item
   - [ ] Format: `## You` / `## Vani` sections, code blocks preserved
@@ -248,4 +249,4 @@ These look attractive but are intentionally off the roadmap. Document the reason
 - Add new items to the appropriate tier as they emerge. Don't let the doc go stale — update on every release.
 - When an item moves between tiers (e.g. Tier 4 → Tier 1 because a user asked for it), note the date and reason inline.
 
-_Last updated: 2026-05-08 (new chat button)_
+_Last updated: 2026-05-08 (better error recovery UI + backend error log)_

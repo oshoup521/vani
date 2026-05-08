@@ -14,7 +14,7 @@ import MessageBubble from './MessageBubble.jsx'
  *   onEditAndResend  {Function} — called with (index, newText) to splice + re-run a turn
  *   onDropFiles      {Function} — called with a FileList when images are dropped on the chat area
  */
-export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, onStop, onEditAndResend, onDropFiles }) {
+export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, onStop, onEditAndResend, onRegenerate, onDropFiles }) {
   const bottomRef = useRef(null)
 
   // editingIndex: which message is currently open in the inline editor (null = none)
@@ -62,6 +62,13 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, o
   let lastUserIndex = -1
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === 'user') { lastUserIndex = i; break }
+  }
+
+  // Find the index of the last settled assistant bubble — only that one gets
+  // a Regenerate button. "Settled" means not streaming and not an error.
+  let lastAssistantIndex = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant' && !messages[i].isError) { lastAssistantIndex = i; break }
   }
 
   // During a streaming turn, an empty assistant bubble is appended immediately
@@ -118,6 +125,7 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, o
         // Only the last user message gets an Edit button, and not while loading.
         const isEditable = !isLoading && index === lastUserIndex && msg.role === 'user'
         const isEditing = editingIndex === index
+        const isRegeneratable = !isLoading && index === lastAssistantIndex && !isStreaming
         return (
           <MessageBubble
             key={index}
@@ -133,6 +141,7 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, o
             onEditSave={(newText) => handleEditSave(index, newText)}
             onEditCancel={handleEditCancel}
             onRetry={msg.isError ? onRetry : undefined}
+            onRegenerate={isRegeneratable ? onRegenerate : undefined}
           />
         )
       })}

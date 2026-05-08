@@ -28,3 +28,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Rotated log backups — errors.log itself is tracked; .log.N are not
+backend/errors.log.[0-9]
+backend/errors.log.[0-9][0-9]

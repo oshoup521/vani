@@ -14,7 +14,9 @@ Deployment (Render):
 """
 
 import json
+import logging
 import os
+from logging.handlers import RotatingFileHandler
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -25,6 +27,16 @@ from litellm import acompletion
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Rotating error log — written to errors.log next to main.py so it can be
+# git-committed and inspected across deploys. Rotates at 1 MB, keeps 5 backups.
+_log_path = os.path.join(os.path.dirname(__file__), "errors.log")
+_handler = RotatingFileHandler(_log_path, maxBytes=1_000_000, backupCount=5, encoding="utf-8")
+_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%S"))
+error_log = logging.getLogger("vani.errors")
+error_log.setLevel(logging.WARNING)
+error_log.addHandler(_handler)
+error_log.propagate = False  # don't double-print to uvicorn's root logger
 
 # Keep LiteLLM quiet in logs unless we need debug output
 litellm.suppress_debug_info = True
@@ -264,15 +276,13 @@ async def chat(request: ChatRequest):
                 raise ValueError("empty reply")
             return {"reply": reply, "model_used": model}
         except Exception as e:
-            # Skip on any failure (rate limit, missing key, provider down, etc.)
-            print(f"[fallback] {model} failed: {type(e).__name__}: {e}")
+            error_log.warning("model=%s err=%s: %s", model, type(e).__name__, e)
             last_error = e
             continue
 
-    raise HTTPException(
-        status_code=503,
-        detail=f"All {len(pool)} models failed. Last error: {last_error}",
-    )
+    detail = f"All {len(pool)} models failed. Last error: {last_error}"
+    error_log.error("POOL_EXHAUSTED pool_size=%d last_err=%s", len(pool), last_error)
+    raise HTTPException(status_code=503, detail=detail)
 
 
 @app.post("/chat/stream")
@@ -331,7 +341,7 @@ async def chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 return
             except Exception as e:
-                print(f"[fallback] {model} stream failed: {type(e).__name__}: {e}")
+                error_log.warning("stream model=%s err=%s: %s", model, type(e).__name__, e)
                 last_error = e
                 # Only fall through if we never committed. If we did commit,
                 # the exception happened mid-stream — re-raise as an SSE error
@@ -342,6 +352,7 @@ async def chat_stream(request: ChatRequest):
                 continue
 
         msg = f"All {len(pool)} models failed. Last error: {last_error}"
+        error_log.error("STREAM_POOL_EXHAUSTED pool_size=%d last_err=%s", len(pool), last_error)
         yield f"data: {json.dumps({'type': 'error', 'message': msg})}\n\n"
 
     return StreamingResponse(

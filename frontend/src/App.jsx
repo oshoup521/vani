@@ -415,6 +415,20 @@ export default function App() {
     await runStreamingTurn(nextMessages)
   }
 
+  // regenerate — drop the last assistant reply and re-run the turn with the
+  // same history, so the user gets a fresh response without re-typing.
+  function regenerate() {
+    setMessages((prev) => {
+      let trimmed = [...prev]
+      // Drop the trailing assistant bubble (the one being regenerated).
+      if (trimmed.length && trimmed[trimmed.length - 1].role === 'assistant') {
+        trimmed = trimmed.slice(0, -1)
+      }
+      runStreamingTurn(trimmed)
+      return trimmed
+    })
+  }
+
   // editAndResend — splice history to the given index (inclusive), replace
   // that user message with the edited text, then re-run the streaming turn.
   // Edited messages drop the original images (text-only edit for simplicity).
@@ -459,6 +473,7 @@ export default function App() {
         onRetry={handleRetry}
         onStop={stopGeneration}
         onEditAndResend={editAndResend}
+        onRegenerate={regenerate}
         onDropFiles={setDroppedFiles}
       />
       <ChatInput

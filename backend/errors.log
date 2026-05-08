@@ -1,0 +1,3 @@
+# Vani backend error log — rotates at 1 MB, 5 backups kept.
+# This file is git-tracked so errors can be pulled and debugged across machines.
+# Rotated backups (errors.log.1, errors.log.2, ...) are gitignored.
