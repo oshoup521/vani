@@ -595,6 +595,143 @@ button {
   text-underline-offset: 3px;
 }
 
+/* Edit button — sits in the user message footer, same reveal pattern as
+   the assistant copy button (hidden until hover, always-on for touch). */
+.message-edit-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.message:hover .message-edit-btn {
+  opacity: 1;
+}
+
+.message-edit-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+}
+
+.message-edit-btn:focus-visible {
+  outline: 3px solid var(--accent-soft);
+  outline-offset: 3px;
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .message .message-edit-btn {
+    opacity: 1;
+  }
+}
+
+/* Inline editor — replaces the user bubble while editing is active.
+   Matches the bubble's max-width so the layout doesn't shift. */
+.inline-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: min(74%, 720px);
+  align-self: flex-end;
+}
+
+.inline-editor__textarea {
+  width: 100%;
+  min-height: 42px;
+  padding: 11px 14px;
+  border-radius: 14px 14px 4px 14px;
+  border: 2px solid var(--accent);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  resize: none;
+  outline: none;
+  box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow-card);
+  overflow-y: hidden;
+}
+
+.inline-editor__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.inline-editor__btn {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.inline-editor__btn:focus-visible {
+  outline: 3px solid var(--accent-soft);
+  outline-offset: 3px;
+}
+
+.inline-editor__btn--save {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #ffffff;
+}
+
+.inline-editor__btn--save:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.inline-editor__btn--save:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.inline-editor__btn--cancel {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.inline-editor__btn--cancel:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+  transform: translateY(-1px);
+}
+
+@media (max-width: 720px) {
+  .inline-editor {
+    max-width: 88%;
+  }
+}
+
+@media (max-width: 420px) {
+  .inline-editor {
+    max-width: 94%;
+  }
+
+  .inline-editor__actions {
+    gap: 6px;
+  }
+
+  .inline-editor__btn {
+    padding: 6px 11px;
+    font-size: 11px;
+  }
+}
+
 .retry-btn {
   margin-top: 10px;
   background: transparent;

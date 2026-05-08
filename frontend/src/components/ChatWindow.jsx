@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import MessageBubble from './MessageBubble.jsx'
 
 /**
@@ -6,19 +6,35 @@ import MessageBubble from './MessageBubble.jsx'
  * and the "backend is waking up" banner.
  *
  * Props:
- *   messages    {Array}   — array of { role, content, isError? } objects
- *   isLoading   {boolean} — whether we're waiting for a response
- *   isWakingUp  {boolean} — whether the 5s wakeup threshold was crossed
- *   onRetry     {Function} — called when the user clicks "Retry" on an error bubble
- *   onStop      {Function} — called when the user clicks the Stop button mid-stream
+ *   messages         {Array}    — array of { role, content, isError? } objects
+ *   isLoading        {boolean}  — whether we're waiting for a response
+ *   isWakingUp       {boolean}  — whether the 5s wakeup threshold was crossed
+ *   onRetry          {Function} — called when the user clicks "Retry" on an error bubble
+ *   onStop           {Function} — called when the user clicks the Stop button mid-stream
+ *   onEditAndResend  {Function} — called with (index, newText) to splice + re-run a turn
  */
-export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, onStop }) {
+export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, onStop, onEditAndResend }) {
   const bottomRef = useRef(null)
+
+  // editingIndex: which message is currently open in the inline editor (null = none)
+  const [editingIndex, setEditingIndex] = useState(null)
 
   // Auto-scroll to the bottom whenever messages change or loading state changes
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
+
+  // If a new turn starts (isLoading flips on), close any open editor so the
+  // in-progress bubble is visible without an orphaned textarea above it.
+  useEffect(() => {
+    if (isLoading) setEditingIndex(null)
+  }, [isLoading])
+
+  // Find the index of the last user message — only that one gets an Edit button.
+  let lastUserIndex = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') { lastUserIndex = i; break }
+  }
 
   // During a streaming turn, an empty assistant bubble is appended immediately
   // and fills as tokens arrive. We show the standalone typing indicator only
@@ -27,6 +43,15 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, o
   const hasStreamingPlaceholder =
     last && last.role === 'assistant' && !last.isError
   const showTypingIndicator = isLoading && !hasStreamingPlaceholder
+
+  function handleEditSave(index, newText) {
+    setEditingIndex(null)
+    onEditAndResend(index, newText)
+  }
+
+  function handleEditCancel() {
+    setEditingIndex(null)
+  }
 
   return (
     <div className="chat-window">
@@ -50,6 +75,9 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, o
           index === messages.length - 1 &&
           msg.role === 'assistant' &&
           !msg.isError
+        // Only the last user message gets an Edit button, and not while loading.
+        const isEditable = !isLoading && index === lastUserIndex && msg.role === 'user'
+        const isEditing = editingIndex === index
         return (
           <MessageBubble
             key={index}
@@ -58,6 +86,11 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, o
             isError={msg.isError}
             modelUsed={msg.modelUsed}
             isStreaming={isStreaming}
+            isEditable={isEditable}
+            isEditing={isEditing}
+            onEditStart={() => setEditingIndex(index)}
+            onEditSave={(newText) => handleEditSave(index, newText)}
+            onEditCancel={handleEditCancel}
             onRetry={msg.isError ? onRetry : undefined}
           />
         )

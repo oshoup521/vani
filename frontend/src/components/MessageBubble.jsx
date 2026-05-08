@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -398,17 +398,97 @@ function Pre({ children }) {
 }
 
 /**
+ * InlineEditor — replaces the user bubble content while editing is active.
+ * Auto-focuses, auto-sizes, and handles Save (Enter / button) and Cancel (Escape / button).
+ */
+function InlineEditor({ initialText, onSave, onCancel }) {
+  const [draft, setDraft] = useState(initialText)
+  const textareaRef = useRef(null)
+
+  // Focus and place cursor at end on mount
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }, [])
+
+  // Auto-resize as the user types
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [draft])
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      const trimmed = draft.trim()
+      if (trimmed) onSave(trimmed)
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      onCancel()
+    }
+  }
+
+  const canSave = draft.trim().length > 0 && draft.trim() !== initialText.trim()
+
+  return (
+    <div className="inline-editor">
+      <textarea
+        ref={textareaRef}
+        className="inline-editor__textarea"
+        value={draft}
+        rows={1}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={handleKeyDown}
+        aria-label="Edit message"
+      />
+      <div className="inline-editor__actions">
+        <button
+          type="button"
+          className="inline-editor__btn inline-editor__btn--save"
+          onClick={() => { const t = draft.trim(); if (t) onSave(t) }}
+          disabled={!canSave}
+        >
+          Save &amp; send
+        </button>
+        <button
+          type="button"
+          className="inline-editor__btn inline-editor__btn--cancel"
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
  * MessageBubble — renders a single chat message.
  * Assistant messages are rendered as Markdown; user messages are plain text.
  *
  * Props:
- *   role       {string}   — "user" or "assistant"
- *   content    {string}   — the message text (may contain markdown for assistant)
- *   isError    {boolean}  — if true, renders with error styling
- *   modelUsed  {string}   — model ID that generated this reply (assistant only)
- *   onRetry    {Function} — optional callback for error retry button
+ *   role         {string}   — "user" or "assistant"
+ *   content      {string}   — the message text (may contain markdown for assistant)
+ *   isError      {boolean}  — if true, renders with error styling
+ *   modelUsed    {string}   — model ID that generated this reply (assistant only)
+ *   isStreaming  {boolean}  — true while the assistant is streaming tokens
+ *   isEditable   {boolean}  — true for the last user message when not loading
+ *   isEditing    {boolean}  — true when the inline editor is open for this bubble
+ *   onEditStart  {Function} — called when the user clicks the Edit button
+ *   onEditSave   {Function} — called with newText when the user saves an edit
+ *   onEditCancel {Function} — called when the user cancels an edit
+ *   onRetry      {Function} — optional callback for error retry button
  */
-function MessageBubble({ role, content, isError, modelUsed, isStreaming, onRetry }) {
+function MessageBubble({
+  role, content, isError, modelUsed, isStreaming,
+  isEditable, isEditing, onEditStart, onEditSave, onEditCancel,
+  onRetry,
+}) {
   const roleClass = role === 'user' ? 'message--user' : 'message--assistant'
   const errorClass = isError ? 'message--error' : ''
   const label = role === 'user' ? 'You' : 'AI'
@@ -429,42 +509,63 @@ function MessageBubble({ role, content, isError, modelUsed, isStreaming, onRetry
       {/* Small label above each bubble */}
       <span className="message__label">{label}</span>
 
-      {/* Bubble with the message text */}
-      <div className="message__bubble">
-        {role === 'assistant' ? (
-          content ? (
-            <div className="markdown">
-              <ReactMarkdown
-                remarkPlugins={REMARK_PLUGINS}
-                rehypePlugins={REHYPE_PLUGINS}
-                components={{ code: InlineCode, pre: Pre }}
-              >
-                {content}
-              </ReactMarkdown>
-            </div>
+      {/* Bubble with the message text, or the inline editor when editing */}
+      {isEditing ? (
+        <InlineEditor
+          initialText={content}
+          onSave={onEditSave}
+          onCancel={onEditCancel}
+        />
+      ) : (
+        <div className="message__bubble">
+          {role === 'assistant' ? (
+            content ? (
+              <div className="markdown">
+                <ReactMarkdown
+                  remarkPlugins={REMARK_PLUGINS}
+                  rehypePlugins={REHYPE_PLUGINS}
+                  components={{ code: InlineCode, pre: Pre }}
+                >
+                  {content}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              // Streaming placeholder — first token hasn't arrived yet
+              <div className="typing-indicator">
+                <span />
+                <span />
+                <span />
+              </div>
+            )
           ) : (
-            // Streaming placeholder — first token hasn't arrived yet
-            <div className="typing-indicator">
-              <span />
-              <span />
-              <span />
+            content
+          )}
+
+          {/* Retry button — only shown on error bubbles */}
+          {isError && onRetry && (
+            <div>
+              <button className="retry-btn" onClick={onRetry}>
+                Retry
+              </button>
             </div>
-          )
-        ) : (
-          content
-        )}
+          )}
+        </div>
+      )}
 
-        {/* Retry button — only shown on error bubbles */}
-        {isError && onRetry && (
-          <div>
-            <button className="retry-btn" onClick={onRetry}>
-              Retry
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Footer row: model attribution + copy button (assistant only) */}
+      {/* Footer row: edit button for last user msg; model + copy + speak for assistant */}
+      {!isEditing && role === 'user' && isEditable && (
+        <div className="message__footer">
+          <button
+            type="button"
+            className="message-edit-btn"
+            onClick={onEditStart}
+            aria-label="Edit message"
+            title="Edit message"
+          >
+            Edit
+          </button>
+        </div>
+      )}
       {role === 'assistant' && (modelLabel || showMessageCopy || showSpeak) && (
         <div className="message__footer">
           {modelLabel && <span className="message__model">via {modelLabel}</span>}

@@ -27,12 +27,12 @@ The highest-ROI work, ordered by what should happen next.
   - [x] Render Stop button in ChatWindow while `isLoading` is true — done 2026-05-08
   - [x] On abort: keep the partial reply (don't wipe it) — done 2026-05-08
   - [x] Test: aborting mid-token doesn't crash the rAF coalescer — done 2026-05-08
-- [ ] **Edit last user message** `S`
-  - [ ] Add edit (pencil) icon on hover for user messages
-  - [ ] Only enable for the *last* user message
-  - [ ] Inline textarea replaces the bubble while editing
-  - [ ] On save: splice messages array to that point, re-run `runStreamingTurn`
-  - [ ] On cancel: restore original
+- [x] **Edit last user message** `S` — done 2026-05-08
+  - [x] Add edit (pencil) icon on hover for user messages — done 2026-05-08
+  - [x] Only enable for the *last* user message — done 2026-05-08
+  - [x] Inline textarea replaces the bubble while editing — done 2026-05-08
+  - [x] On save: splice messages array to that point, re-run `runStreamingTurn` — done 2026-05-08
+  - [x] On cancel: restore original — done 2026-05-08
 - [ ] **File / image upload (multimodal)** `M`
   - [ ] Add file input + paste handler to ChatInput
   - [ ] Show image preview in the user message bubble
@@ -245,4 +245,4 @@ These look attractive but are intentionally off the roadmap. Document the reason
 - Add new items to the appropriate tier as they emerge. Don't let the doc go stale — update on every release.
 - When an item moves between tiers (e.g. Tier 4 → Tier 1 because a user asked for it), note the date and reason inline.
 
-_Last updated: 2026-05-08_
+_Last updated: 2026-05-08 (edit last user message)_

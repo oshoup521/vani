@@ -370,6 +370,18 @@ export default function App() {
     await runStreamingTurn(nextMessages)
   }
 
+  // editAndResend — splice history to the given index (inclusive), replace
+  // that user message with the edited text, then re-run the streaming turn.
+  // Only valid for the last user message, but index is explicit for clarity.
+  async function editAndResend(index, newText) {
+    const sliced = messages.slice(0, index)
+    const editedMsg = { role: 'user', content: newText }
+    const nextMessages = [...sliced, editedMsg]
+    setMessages(nextMessages)
+    setLastUserMessage(newText)
+    await runStreamingTurn(nextMessages)
+  }
+
   /**
    * handleRetry — strips the trailing error bubble (and its triggering user
    * message) and re-runs the turn with the last user text.
@@ -401,6 +413,7 @@ export default function App() {
         isWakingUp={isWakingUp}
         onRetry={handleRetry}
         onStop={stopGeneration}
+        onEditAndResend={editAndResend}
       />
       <ChatInput onSend={sendMessage} disabled={isLoading} />
     </div>
