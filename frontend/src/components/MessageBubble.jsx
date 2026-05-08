@@ -485,7 +485,7 @@ function InlineEditor({ initialText, onSave, onCancel }) {
  *   onRetry      {Function} — optional callback for error retry button
  */
 function MessageBubble({
-  role, content, isError, modelUsed, isStreaming,
+  role, content, images, isError, modelUsed, isStreaming,
   isEditable, isEditing, onEditStart, onEditSave, onEditCancel,
   onRetry,
 }) {
@@ -493,16 +493,22 @@ function MessageBubble({
   const errorClass = isError ? 'message--error' : ''
   const label = role === 'user' ? 'You' : 'AI'
 
+  // content can be a string or an OpenAI-style multipart array. Extract the
+  // plain-text portion for rendering in the bubble and for the inline editor.
+  const textContent = Array.isArray(content)
+    ? (content.find((p) => p.type === 'text')?.text ?? '')
+    : (content ?? '')
+
   // Strip the ":free" suffix for cleaner display — e.g. "google/gemma-4-31b-it"
   const modelLabel = modelUsed ? modelUsed.replace(':free', '') : null
 
   // Show the message-level copy button only on assistant replies that have
   // actual content (not the streaming placeholder, not error bubbles).
-  const showMessageCopy = role === 'assistant' && !isError && !!content
+  const showMessageCopy = role === 'assistant' && !isError && !!textContent
   // Speech synthesis only when content is settled — reading a half-streamed
   // reply gets cut off when the next chunk arrives.
   const showSpeak =
-    role === 'assistant' && !isError && !!content && !isStreaming && !!SpeechSynthesisImpl
+    role === 'assistant' && !isError && !!textContent && !isStreaming && !!SpeechSynthesisImpl
 
   return (
     <div className={`message ${roleClass} ${errorClass}`}>
@@ -512,21 +518,21 @@ function MessageBubble({
       {/* Bubble with the message text, or the inline editor when editing */}
       {isEditing ? (
         <InlineEditor
-          initialText={content}
+          initialText={textContent}
           onSave={onEditSave}
           onCancel={onEditCancel}
         />
       ) : (
         <div className="message__bubble">
           {role === 'assistant' ? (
-            content ? (
+            textContent ? (
               <div className="markdown">
                 <ReactMarkdown
                   remarkPlugins={REMARK_PLUGINS}
                   rehypePlugins={REHYPE_PLUGINS}
                   components={{ code: InlineCode, pre: Pre }}
                 >
-                  {content}
+                  {textContent}
                 </ReactMarkdown>
               </div>
             ) : (
@@ -538,7 +544,21 @@ function MessageBubble({
               </div>
             )
           ) : (
-            content
+            <>
+              {images && images.length > 0 && (
+                <div className="message-image-grid">
+                  {images.map((img, i) => (
+                    <img
+                      key={i}
+                      src={img.dataUrl}
+                      alt={img.name || `Attached image ${i + 1}`}
+                      className="message-image"
+                    />
+                  ))}
+                </div>
+              )}
+              {textContent && <span>{textContent}</span>}
+            </>
           )}
 
           {/* Retry button — only shown on error bubbles */}
@@ -570,9 +590,9 @@ function MessageBubble({
         <div className="message__footer">
           {modelLabel && <span className="message__model">via {modelLabel}</span>}
           {showMessageCopy && (
-            <CopyButton text={content} className="message-copy-btn" label="Copy" />
+            <CopyButton text={textContent} className="message-copy-btn" label="Copy" />
           )}
-          {showSpeak && <SpeakButton text={content} />}
+          {showSpeak && <SpeakButton text={textContent} />}
         </div>
       )}
     </div>

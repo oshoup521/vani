@@ -118,6 +118,9 @@ export default function App() {
   // the Stop button can cancel it. Cleared in the finally block.
   const abortRef = useRef(null)
 
+  // droppedFiles: files dropped on the chat window area, forwarded to ChatInput
+  const [droppedFiles, setDroppedFiles] = useState(null)
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     document.documentElement.style.colorScheme = theme
@@ -362,8 +365,22 @@ export default function App() {
     abortRef.current?.abort()
   }
 
-  async function sendMessage(userText) {
-    const userMsg = { role: 'user', content: userText }
+  // buildUserContent — turns text + images into either a plain string (no
+  // images) or an OpenAI-style multipart array that the backend forwards to
+  // vision-capable models.
+  function buildUserContent(text, images) {
+    if (!images || images.length === 0) return text
+    const parts = []
+    if (text) parts.push({ type: 'text', text })
+    for (const img of images) {
+      parts.push({ type: 'image_url', image_url: { url: img.dataUrl } })
+    }
+    return parts
+  }
+
+  async function sendMessage(userText, images = []) {
+    const content = buildUserContent(userText, images)
+    const userMsg = { role: 'user', content, images }
     const nextMessages = [...messages, userMsg]
     setMessages(nextMessages)
     setLastUserMessage(userText)
@@ -372,7 +389,7 @@ export default function App() {
 
   // editAndResend — splice history to the given index (inclusive), replace
   // that user message with the edited text, then re-run the streaming turn.
-  // Only valid for the last user message, but index is explicit for clarity.
+  // Edited messages drop the original images (text-only edit for simplicity).
   async function editAndResend(index, newText) {
     const sliced = messages.slice(0, index)
     const editedMsg = { role: 'user', content: newText }
@@ -414,8 +431,14 @@ export default function App() {
         onRetry={handleRetry}
         onStop={stopGeneration}
         onEditAndResend={editAndResend}
+        onDropFiles={setDroppedFiles}
       />
-      <ChatInput onSend={sendMessage} disabled={isLoading} />
+      <ChatInput
+        onSend={sendMessage}
+        disabled={isLoading}
+        droppedFiles={droppedFiles}
+        onDropConsumed={() => setDroppedFiles(null)}
+      />
     </div>
   )
 }

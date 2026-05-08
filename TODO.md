@@ -33,13 +33,13 @@ The highest-ROI work, ordered by what should happen next.
   - [x] Inline textarea replaces the bubble while editing — done 2026-05-08
   - [x] On save: splice messages array to that point, re-run `runStreamingTurn` — done 2026-05-08
   - [x] On cancel: restore original — done 2026-05-08
-- [ ] **File / image upload (multimodal)** `M`
-  - [ ] Add file input + paste handler to ChatInput
-  - [ ] Show image preview in the user message bubble
-  - [ ] Backend: detect image content, route to vision-capable model in pool
-  - [ ] Handle EXIF rotation, max dimensions, HEIC→JPEG
-  - [ ] Update sliding-window logic to account for image bytes
-  - [ ] Surface "model doesn't support images" gracefully when fallback chain has no vision model available
+- [x] **File / image upload (multimodal)** `M` — done 2026-05-08
+  - [x] Add file input + paste handler to ChatInput — done 2026-05-08
+  - [x] Show image preview in the user message bubble — done 2026-05-08
+  - [x] Backend: detect image content, route to vision-capable model in pool — done 2026-05-08
+  - [x] Handle EXIF rotation, max dimensions, HEIC→JPEG — done 2026-05-08 (HEIC rejected with clear message; EXIF rotation is browser/OS responsibility; max 5 MB enforced client-side)
+  - [x] Update sliding-window logic to account for image bytes — done 2026-05-08 (1000-token flat estimate per image)
+  - [x] Surface "model doesn't support images" gracefully when fallback chain has no vision model available — done 2026-05-08 (VISION_MODEL_POOL exhaustion returns 503 with clear message)
 - [ ] **Voice mode (continuous conversation)** `L`
   - [ ] Toggle in header to enter voice mode
   - [ ] Continuous STT with end-of-speech detection
@@ -245,4 +245,4 @@ These look attractive but are intentionally off the roadmap. Document the reason
 - Add new items to the appropriate tier as they emerge. Don't let the doc go stale — update on every release.
 - When an item moves between tiers (e.g. Tier 4 → Tier 1 because a user asked for it), note the date and reason inline.
 
-_Last updated: 2026-05-08 (edit last user message)_
+_Last updated: 2026-05-08 (multimodal image upload)_

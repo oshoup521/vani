@@ -19,7 +19,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List
+from typing import List, Union
 import litellm
 from litellm import acompletion
 from dotenv import load_dotenv
@@ -58,6 +58,18 @@ MODEL_POOL = [
     "openrouter/meta-llama/llama-3.2-3b-instruct:free",
     # Other free-tier providers — only hit if their API key is set in env.
     "cerebras/llama3.1-8b",
+    "gemini/gemini-2.0-flash",
+]
+
+# Vision-capable free models, tried in order when the request contains images.
+# Groq does not yet support vision in its free tier, so this is OpenRouter-only.
+# IDs verified against https://openrouter.ai/api/v1/models — refresh if 404s appear.
+VISION_MODEL_POOL = [
+    "openrouter/google/gemini-2.5-flash-preview:free",
+    "openrouter/google/gemini-2.0-flash-exp:free",
+    "openrouter/qwen/qwen2.5-vl-72b-instruct:free",
+    "openrouter/meta-llama/llama-3.2-11b-vision-instruct:free",
+    # Gemini via direct key if set — reliable fallback
     "gemini/gemini-2.0-flash",
 ]
 
@@ -126,18 +138,39 @@ MAX_HISTORY_TURNS = 40
 
 class Message(BaseModel):
     role: str
-    content: str
+    # content is either a plain string or an OpenAI-style multipart list:
+    # [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "data:..."}}]
+    content: Union[str, list]
 
 
 class ChatRequest(BaseModel):
     messages: List[Message]
 
 
-def estimate_tokens(text: str) -> int:
-    """Rough token count without a tokenizer dependency. ~4 chars/token is a
-    standard heuristic for English; over-estimates slightly for code, which
-    is the safe direction for budget calculations."""
-    return max(1, len(text) // 4)
+def estimate_tokens(content: Union[str, list]) -> int:
+    """Rough token count. Text: ~4 chars/token. Each image part costs a fixed
+    1000-token estimate — conservative but avoids pulling in a tokenizer dep."""
+    if isinstance(content, str):
+        return max(1, len(content) // 4)
+    total = 0
+    for part in content:
+        if part.get("type") == "text":
+            total += max(1, len(part.get("text", "")) // 4)
+        elif part.get("type") == "image_url":
+            total += 1000  # conservative per-image budget
+    return total or 1
+
+
+def has_image(content: Union[str, list]) -> bool:
+    """Return True if this message content contains at least one image part."""
+    if isinstance(content, list):
+        return any(p.get("type") == "image_url" for p in content)
+    return False
+
+
+def payload_has_images(messages: List[dict]) -> bool:
+    """Return True if any message in the payload contains an image."""
+    return any(has_image(m.get("content", "")) for m in messages)
 
 
 def trim_history(messages: List[Message]) -> List[dict]:
@@ -180,9 +213,13 @@ def trim_history(messages: List[Message]) -> List[dict]:
     return kept
 
 
-def build_payload(messages: List[Message]) -> List[dict]:
-    """System prompt + windowed history. Used by both /chat and /chat/stream."""
-    return [{"role": "system", "content": SYSTEM_PROMPT}] + trim_history(messages)
+def build_payload(messages: List[Message]) -> tuple[List[dict], bool]:
+    """System prompt + windowed history. Returns (payload, needs_vision).
+    needs_vision is True when any message contains an image part — callers
+    should route to VISION_MODEL_POOL instead of MODEL_POOL."""
+    history = trim_history(messages)
+    payload = [{"role": "system", "content": SYSTEM_PROMPT}] + history
+    return payload, payload_has_images(history)
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
@@ -193,14 +230,15 @@ async def health_check():
 @app.post("/chat")
 async def chat(request: ChatRequest):
     """
-    Walks MODEL_POOL in order. For each model, LiteLLM translates the call to
-    the right provider's API. On rate limit / auth / transient error we move
-    to the next model. If all fail, return 503.
+    Walks MODEL_POOL (or VISION_MODEL_POOL for image requests) in order.
+    LiteLLM translates the call to the right provider's API. On rate limit /
+    auth / transient error we move to the next model. If all fail, return 503.
     """
-    messages_payload = build_payload(request.messages)
+    messages_payload, needs_vision = build_payload(request.messages)
+    pool = VISION_MODEL_POOL if needs_vision else MODEL_POOL
 
     last_error = None
-    for model in MODEL_POOL:
+    for model in pool:
         kwargs = {
             "model": model,
             "messages": messages_payload,
@@ -226,7 +264,7 @@ async def chat(request: ChatRequest):
 
     raise HTTPException(
         status_code=503,
-        detail=f"All {len(MODEL_POOL)} models failed. Last error: {last_error}",
+        detail=f"All {len(pool)} models failed. Last error: {last_error}",
     )
 
 
@@ -246,11 +284,12 @@ async def chat_stream(request: ChatRequest):
       { "type": "done" }                            — normal end of stream
       { "type": "error", "message": "<msg>" }       — terminal error
     """
-    messages_payload = build_payload(request.messages)
+    messages_payload, needs_vision = build_payload(request.messages)
+    pool = VISION_MODEL_POOL if needs_vision else MODEL_POOL
 
     async def event_generator():
         last_error = None
-        for model in MODEL_POOL:
+        for model in pool:
             kwargs = {
                 "model": model,
                 "messages": messages_payload,
@@ -295,7 +334,7 @@ async def chat_stream(request: ChatRequest):
                     return
                 continue
 
-        msg = f"All {len(MODEL_POOL)} models failed. Last error: {last_error}"
+        msg = f"All {len(pool)} models failed. Last error: {last_error}"
         yield f"data: {json.dumps({'type': 'error', 'message': msg})}\n\n"
 
     return StreamingResponse(

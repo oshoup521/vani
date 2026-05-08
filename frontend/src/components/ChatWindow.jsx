@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import MessageBubble from './MessageBubble.jsx'
 
 /**
@@ -12,12 +12,40 @@ import MessageBubble from './MessageBubble.jsx'
  *   onRetry          {Function} — called when the user clicks "Retry" on an error bubble
  *   onStop           {Function} — called when the user clicks the Stop button mid-stream
  *   onEditAndResend  {Function} — called with (index, newText) to splice + re-run a turn
+ *   onDropFiles      {Function} — called with a FileList when images are dropped on the chat area
  */
-export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, onStop, onEditAndResend }) {
+export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, onStop, onEditAndResend, onDropFiles }) {
   const bottomRef = useRef(null)
 
   // editingIndex: which message is currently open in the inline editor (null = none)
   const [editingIndex, setEditingIndex] = useState(null)
+
+  // dragOver: true while an image is being dragged over the chat window area
+  const [dragOver, setDragOver] = useState(false)
+  const dragCounterRef = useRef(0)
+
+  const handleWindowDragEnter = useCallback((e) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return
+    e.preventDefault()
+    dragCounterRef.current += 1
+    if (dragCounterRef.current === 1) setDragOver(true)
+  }, [])
+
+  const handleWindowDragLeave = useCallback((e) => {
+    e.preventDefault()
+    dragCounterRef.current -= 1
+    if (dragCounterRef.current === 0) setDragOver(false)
+  }, [])
+
+  const handleWindowDragOver = useCallback((e) => { e.preventDefault() }, [])
+
+  const handleWindowDrop = useCallback((e) => {
+    e.preventDefault()
+    dragCounterRef.current = 0
+    setDragOver(false)
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'))
+    if (files.length && onDropFiles) onDropFiles(files)
+  }, [onDropFiles])
 
   // Auto-scroll to the bottom whenever messages change or loading state changes
   useEffect(() => {
@@ -54,7 +82,19 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, o
   }
 
   return (
-    <div className="chat-window">
+    <div
+      className={`chat-window${dragOver ? ' chat-window--drag-over' : ''}`}
+      onDragEnter={handleWindowDragEnter}
+      onDragLeave={handleWindowDragLeave}
+      onDragOver={handleWindowDragOver}
+      onDrop={handleWindowDrop}
+    >
+      {dragOver && (
+        <div className="chat-drop-overlay" aria-hidden="true">
+          <span>Drop image to attach</span>
+        </div>
+      )}
+
       {/* Empty state — shown before the first message */}
       {messages.length === 0 && !isLoading && (
         <div className="empty-state">
@@ -83,6 +123,7 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, o
             key={index}
             role={msg.role}
             content={msg.content}
+            images={msg.images}
             isError={msg.isError}
             modelUsed={msg.modelUsed}
             isStreaming={isStreaming}
