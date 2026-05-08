@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ChatWindow from './components/ChatWindow.jsx'
 import ChatInput from './components/ChatInput.jsx'
 
@@ -6,11 +6,55 @@ import ChatInput from './components/ChatInput.jsx'
 // In local dev, set this in frontend/.env (copy from .env.example).
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
+const MESSAGES_STORAGE_KEY = 'vani-messages'
+const MAX_STORED_MESSAGES = 500
+const MAX_STORED_BYTES = 4 * 1024 * 1024 // 4 MB
+
 function getInitialTheme() {
   const savedTheme = localStorage.getItem('vani-theme')
   if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme
 
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+}
+
+// Validate a single message shape so a corrupted entry can't poison rendering.
+function isValidMessage(m) {
+  return (
+    m &&
+    typeof m === 'object' &&
+    (m.role === 'user' || m.role === 'assistant') &&
+    typeof m.content === 'string'
+  )
+}
+
+// Read messages from localStorage on mount. Returns [] for missing or
+// malformed data — never throws — so a bad payload can't block the app.
+function getInitialMessages() {
+  try {
+    const raw = localStorage.getItem(MESSAGES_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(isValidMessage)
+  } catch {
+    return []
+  }
+}
+
+// Trim history to the cap (last N messages, then under the byte budget).
+// Drops oldest first; returns the JSON string ready for storage, or null
+// if even a single message exceeds the budget.
+function serializeForStorage(messages) {
+  let trimmed =
+    messages.length > MAX_STORED_MESSAGES
+      ? messages.slice(-MAX_STORED_MESSAGES)
+      : messages
+  let serialized = JSON.stringify(trimmed)
+  while (serialized.length > MAX_STORED_BYTES && trimmed.length > 1) {
+    trimmed = trimmed.slice(1)
+    serialized = JSON.stringify(trimmed)
+  }
+  return serialized.length > MAX_STORED_BYTES ? null : serialized
 }
 
 // Header component - displays the app name, tagline, and theme switcher
@@ -57,7 +101,8 @@ export default function App() {
   const [theme, setTheme] = useState(getInitialTheme)
 
   // messages: array of { role: "user" | "assistant", content: string, isError?: bool }
-  const [messages, setMessages] = useState([])
+  // Hydrated from localStorage on mount; persisted (debounced) on every change.
+  const [messages, setMessages] = useState(getInitialMessages)
 
   // isLoading: true while awaiting a response from the backend
   const [isLoading, setIsLoading] = useState(false)
@@ -74,6 +119,33 @@ export default function App() {
     document.documentElement.style.colorScheme = theme
     localStorage.setItem('vani-theme', theme)
   }, [theme])
+
+  // Persist messages to localStorage, debounced 500ms so we don't write on
+  // every streamed token. Skips bubbles flagged as transient errors and any
+  // empty assistant placeholder still being filled.
+  const persistTimerRef = useRef(null)
+  useEffect(() => {
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+    persistTimerRef.current = setTimeout(() => {
+      const persistable = messages.filter(
+        (m) => !m.isError && !(m.role === 'assistant' && m.content === ''),
+      )
+      try {
+        if (persistable.length === 0) {
+          localStorage.removeItem(MESSAGES_STORAGE_KEY)
+          return
+        }
+        const serialized = serializeForStorage(persistable)
+        if (serialized) localStorage.setItem(MESSAGES_STORAGE_KEY, serialized)
+      } catch {
+        // QuotaExceeded or storage unavailable — drop silently rather than
+        // breaking the chat. Next successful write will catch up.
+      }
+    }, 500)
+    return () => {
+      if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+    }
+  }, [messages])
 
   function toggleTheme() {
     setTheme((currentTheme) => currentTheme === 'dark' ? 'light' : 'dark')
