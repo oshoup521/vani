@@ -211,6 +211,9 @@ Backlog of small problems found during development. Triage as they come up.
   - Fix path: better in-app guidance or the voice picker (Tier 1.8)
 - [ ] Free OpenRouter pool routinely 429s due to shared upstream limits
   - Fix path: add OpenRouter $5 credit balance OR rely on Groq as primary (current setup)
+- [~] Vision model pool was stale — all 4 original IDs were removed from free tier
+  - Fix: updated VISION_MODEL_POOL on 2026-05-08 to verified IDs: gemma-4-31b-it, gemma-4-26b-a4b-it, nemotron-3-nano-omni, qianfan-ocr-fast
+  - Note: free vision model availability changes weekly — re-verify at openrouter.ai/api/v1/models if failures recur
 - [ ] HF tokenizer download warning on every fresh deploy (Render cold start)
   - Fix path: harmless, ignore. If logs get noisy, set `HF_HUB_DISABLE_IMPLICIT_TOKEN=1`
 - [ ] Service worker cache staleness on iOS Safari after deploys

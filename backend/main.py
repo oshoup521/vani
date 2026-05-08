@@ -62,14 +62,21 @@ MODEL_POOL = [
 ]
 
 # Vision-capable free models, tried in order when the request contains images.
-# Groq does not yet support vision in its free tier, so this is OpenRouter-only.
-# IDs verified against https://openrouter.ai/api/v1/models — refresh if 404s appear.
+# Verified against https://openrouter.ai/api/v1/models on 2026-05-08.
+# Free vision model availability changes frequently — re-verify if you see 404s.
+# To refresh: GET https://openrouter.ai/api/v1/models, filter context_length > 0
+# and modalities includes "image".
 VISION_MODEL_POOL = [
-    "openrouter/google/gemini-2.5-flash-preview:free",
-    "openrouter/google/gemini-2.0-flash-exp:free",
-    "openrouter/qwen/qwen2.5-vl-72b-instruct:free",
-    "openrouter/meta-llama/llama-3.2-11b-vision-instruct:free",
-    # Gemini via direct key if set — reliable fallback
+    # Gemma 4 supports image + text — same model used in text pool, so it's
+    # already proven to be up. Best first choice.
+    "openrouter/google/gemma-4-31b-it:free",
+    # Gemma 4 26B MoE variant — lighter, good fallback
+    "openrouter/google/gemma-4-26b-a4b-it:free",
+    # NVIDIA Nemotron Omni — multimodal (image, audio, video)
+    "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    # Baidu OCR — fast, purpose-built for image/text extraction
+    "openrouter/baidu/qianfan-ocr-fast:free",
+    # Gemini via direct API key if GEMINI_API_KEY is set in env
     "gemini/gemini-2.0-flash",
 ]
 
