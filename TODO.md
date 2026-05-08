@@ -21,12 +21,12 @@ The highest-ROI work, ordered by what should happen next.
   - [x] Write to localStorage on every messages change (debounce 500ms) — done 2026-05-08
   - [x] Cap stored history at last 500 messages OR 4 MB, whichever is smaller — done 2026-05-08
   - [x] Add migration guard for missing/malformed stored data — done 2026-05-08
-- [ ] **Stop generation button** `S`
-  - [ ] Wire `AbortController` into `streamChat`
-  - [ ] Expose abort function from `runStreamingTurn`
-  - [ ] Render Stop button in ChatWindow while `isLoading` is true
-  - [ ] On abort: keep the partial reply (don't wipe it)
-  - [ ] Test: aborting mid-token doesn't crash the rAF coalescer
+- [x] **Stop generation button** `S` — done 2026-05-08
+  - [x] Wire `AbortController` into `streamChat` — done 2026-05-08
+  - [x] Expose abort function from `runStreamingTurn` — done 2026-05-08
+  - [x] Render Stop button in ChatWindow while `isLoading` is true — done 2026-05-08
+  - [x] On abort: keep the partial reply (don't wipe it) — done 2026-05-08
+  - [x] Test: aborting mid-token doesn't crash the rAF coalescer — done 2026-05-08
 - [ ] **Edit last user message** `S`
   - [ ] Add edit (pencil) icon on hover for user messages
   - [ ] Only enable for the *last* user message

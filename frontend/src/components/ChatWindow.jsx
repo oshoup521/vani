@@ -10,8 +10,9 @@ import MessageBubble from './MessageBubble.jsx'
  *   isLoading   {boolean} — whether we're waiting for a response
  *   isWakingUp  {boolean} — whether the 5s wakeup threshold was crossed
  *   onRetry     {Function} — called when the user clicks "Retry" on an error bubble
+ *   onStop      {Function} — called when the user clicks the Stop button mid-stream
  */
-export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry }) {
+export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry, onStop }) {
   const bottomRef = useRef(null)
 
   // Auto-scroll to the bottom whenever messages change or loading state changes
@@ -71,6 +72,24 @@ export default function ChatWindow({ messages, isLoading, isWakingUp, onRetry })
             <span />
             <span />
           </div>
+        </div>
+      )}
+
+      {/* Stop button — visible only while a turn is in flight. Sits centered
+          below the streaming content so it's reachable without leaving the
+          reading area. */}
+      {isLoading && onStop && (
+        <div className="stop-row">
+          <button
+            type="button"
+            className="stop-btn"
+            onClick={onStop}
+            aria-label="Stop generating"
+            title="Stop generating"
+          >
+            <span className="stop-btn__icon" aria-hidden="true" />
+            Stop generating
+          </button>
         </div>
       )}
 

@@ -114,6 +114,10 @@ export default function App() {
   // lastUserMessage: kept so the retry button can re-send after an error
   const [lastUserMessage, setLastUserMessage] = useState(null)
 
+  // abortRef: holds the AbortController for the in-flight streaming turn so
+  // the Stop button can cancel it. Cleared in the finally block.
+  const abortRef = useRef(null)
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     document.documentElement.style.colorScheme = theme
@@ -157,11 +161,12 @@ export default function App() {
    * Resolves when the stream ends; throws on transport errors or terminal
    * `error` events that arrive *before* any tokens.
    */
-  async function streamChat(payload, onEvent) {
+  async function streamChat(payload, onEvent, signal) {
     const response = await fetch(`${API_URL}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal,
     })
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
@@ -214,6 +219,10 @@ export default function App() {
   async function runStreamingTurn(history) {
     setIsLoading(true)
     setIsWakingUp(false)
+
+    // One AbortController per turn. The Stop button calls .abort() on this.
+    const controller = new AbortController()
+    abortRef.current = controller
 
     // If backend hasn't started streaming in 5s, show the waking-up banner
     const wakeupTimer = setTimeout(() => setIsWakingUp(true), 5000)
@@ -287,11 +296,13 @@ export default function App() {
             // Only reachable mid-stream — pre-token errors throw inside streamChat.
             midStreamError = event.message
           }
-        })
+        }, controller.signal)
 
       try {
         await attempt()
       } catch (firstErr) {
+        // Don't auto-retry a user-initiated abort.
+        if (controller.signal.aborted) throw firstErr
         if (firstTokenSeen) throw firstErr
         await new Promise((r) => setTimeout(r, 800))
         await attempt()
@@ -303,24 +314,52 @@ export default function App() {
         appendDelta(`\n\n_(stream interrupted: ${midStreamError})_`)
       }
     } catch (err) {
-      // No tokens ever arrived — replace the empty placeholder with an error bubble.
-      setMessages((prev) => {
-        const next = [...prev]
-        next[assistantIndex] = {
-          role: 'assistant',
-          content: `Something went wrong: ${err.message}`,
-          isError: true,
+      // User clicked Stop. Keep whatever partial reply we have; just append
+      // a small marker so it's clear the response was cut short. If no token
+      // ever arrived, replace the empty placeholder with a neutral note
+      // rather than an error bubble (this wasn't a failure).
+      if (controller.signal.aborted || err.name === 'AbortError') {
+        if (firstTokenSeen) {
+          appendDelta('\n\n_(stopped)_')
+        } else {
+          setMessages((prev) => {
+            const next = [...prev]
+            next[assistantIndex] = {
+              role: 'assistant',
+              content: '_(stopped before any reply)_',
+            }
+            return next
+          })
         }
-        return next
-      })
+      } else {
+        // No tokens ever arrived — replace the empty placeholder with an error bubble.
+        setMessages((prev) => {
+          const next = [...prev]
+          next[assistantIndex] = {
+            role: 'assistant',
+            content: `Something went wrong: ${err.message}`,
+            isError: true,
+          }
+          return next
+        })
+      }
     } finally {
       // Flush any tokens that were buffered between the last rAF tick and
-      // stream end, so the final words actually appear.
+      // stream end, so the final words actually appear. Safe even after
+      // abort: flushPending no-ops on empty pendingChunk and setMessages
+      // simply re-renders the bubble we already have.
       finalFlush()
       clearTimeout(wakeupTimer)
+      abortRef.current = null
       setIsLoading(false)
       setIsWakingUp(false)
     }
+  }
+
+  // stopGeneration — invoked by the Stop button in ChatWindow. Aborts the
+  // in-flight fetch; runStreamingTurn's catch block keeps the partial reply.
+  function stopGeneration() {
+    abortRef.current?.abort()
   }
 
   async function sendMessage(userText) {
@@ -361,6 +400,7 @@ export default function App() {
         isLoading={isLoading}
         isWakingUp={isWakingUp}
         onRetry={handleRetry}
+        onStop={stopGeneration}
       />
       <ChatInput onSend={sendMessage} disabled={isLoading} />
     </div>

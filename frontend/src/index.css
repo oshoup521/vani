@@ -614,6 +614,48 @@ button {
   transform: translateY(-1px);
 }
 
+.stop-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, background-color 0.15s ease;
+}
+
+.stop-btn:hover {
+  color: var(--error);
+  border-color: var(--error);
+  transform: translateY(-1px);
+}
+
+.stop-btn:focus-visible {
+  outline: 3px solid var(--accent-soft);
+  outline-offset: 3px;
+}
+
+.stop-btn__icon {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
 .typing-indicator {
   display: flex;
   align-items: center;
