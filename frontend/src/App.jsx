@@ -1,69 +1,168 @@
 import { useEffect, useRef, useState } from 'react'
 import ChatWindow from './components/ChatWindow.jsx'
 import ChatInput from './components/ChatInput.jsx'
+import Sidebar from './components/Sidebar.jsx'
 
-// The backend URL comes from the VITE_API_URL environment variable.
-// In local dev, set this in frontend/.env (copy from .env.example).
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-const MESSAGES_STORAGE_KEY = 'vani-messages'
+const SESSIONS_KEY = 'vani-sessions'
+const ACTIVE_KEY = 'vani-active-id'
+const MAX_SESSIONS = 20
+const MAX_LLM_MESSAGES = 20
 const MAX_STORED_MESSAGES = 500
-const MAX_STORED_BYTES = 4 * 1024 * 1024 // 4 MB
+const MAX_STORED_BYTES = 4 * 1024 * 1024
 
 function getInitialTheme() {
-  const savedTheme = localStorage.getItem('vani-theme')
-  if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme
-
+  const saved = localStorage.getItem('vani-theme')
+  if (saved === 'light' || saved === 'dark') return saved
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
 }
 
-// Validate a single message shape so a corrupted entry can't poison rendering.
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2)
+}
+
+function generateSessionName(messages) {
+  const first = messages.find((m) => m.role === 'user')
+  if (!first) return 'New chat'
+  const text = Array.isArray(first.content)
+    ? (first.content.find((p) => p.type === 'text')?.text ?? '')
+    : first.content
+  return text.trim().slice(0, 30) || 'New chat'
+}
+
 function isValidMessage(m) {
   return (
     m &&
     typeof m === 'object' &&
     (m.role === 'user' || m.role === 'assistant') &&
-    typeof m.content === 'string'
+    (typeof m.content === 'string' || Array.isArray(m.content))
   )
 }
 
-// Read messages from localStorage on mount. Returns [] for missing or
-// malformed data — never throws — so a bad payload can't block the app.
-function getInitialMessages() {
-  try {
-    const raw = localStorage.getItem(MESSAGES_STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(isValidMessage)
-  } catch {
-    return []
+function makeSession(overrides = {}) {
+  return {
+    id: generateId(),
+    name: 'New chat',
+    messages: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    ...overrides,
   }
 }
 
-// Trim history to the cap (last N messages, then under the byte budget).
-// Drops oldest first; returns the JSON string ready for storage, or null
-// if even a single message exceeds the budget.
-function serializeForStorage(messages) {
-  let trimmed =
-    messages.length > MAX_STORED_MESSAGES
-      ? messages.slice(-MAX_STORED_MESSAGES)
-      : messages
+// Reads sessions from localStorage, migrating the old 'vani-messages' key if needed.
+// Always returns { sessions: [...], activeId: string }.
+function getInitialSessions() {
+  try {
+    const newRaw = localStorage.getItem(SESSIONS_KEY)
+
+    // One-time migration from the single-session schema
+    if (!newRaw) {
+      const oldRaw = localStorage.getItem('vani-messages')
+      if (oldRaw) {
+        const oldMessages = JSON.parse(oldRaw)
+        if (Array.isArray(oldMessages)) {
+          const session = makeSession({
+            name: 'Previous chat',
+            messages: oldMessages.filter(isValidMessage),
+          })
+          localStorage.setItem(SESSIONS_KEY, JSON.stringify([session]))
+          localStorage.setItem(ACTIVE_KEY, session.id)
+          localStorage.removeItem('vani-messages')
+          return { sessions: [session], activeId: session.id }
+        }
+      }
+      // Brand new user
+      const session = makeSession()
+      return { sessions: [session], activeId: session.id }
+    }
+
+    const parsed = JSON.parse(newRaw)
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      const session = makeSession()
+      return { sessions: [session], activeId: session.id }
+    }
+
+    const valid = parsed.filter(
+      (s) => s && typeof s.id === 'string' && Array.isArray(s.messages),
+    )
+    if (valid.length === 0) {
+      const session = makeSession()
+      return { sessions: [session], activeId: session.id }
+    }
+
+    const savedActiveId = localStorage.getItem(ACTIVE_KEY)
+    const activeId = valid.find((s) => s.id === savedActiveId)
+      ? savedActiveId
+      : valid[valid.length - 1].id
+
+    return { sessions: valid, activeId }
+  } catch {
+    const session = makeSession()
+    return { sessions: [session], activeId: session.id }
+  }
+}
+
+function serializeSessionsForStorage(sessions) {
+  let trimmed = sessions.length > MAX_SESSIONS ? sessions.slice(-MAX_SESSIONS) : sessions
+
+  trimmed = trimmed.map((s) => ({
+    ...s,
+    messages: s.messages.length > MAX_STORED_MESSAGES
+      ? s.messages.slice(-MAX_STORED_MESSAGES)
+      : s.messages,
+  }))
+
   let serialized = JSON.stringify(trimmed)
-  while (serialized.length > MAX_STORED_BYTES && trimmed.length > 1) {
-    trimmed = trimmed.slice(1)
+
+  // If over byte budget, drop the oldest message from the largest session, repeat
+  while (serialized.length > MAX_STORED_BYTES && trimmed.some((s) => s.messages.length > 1)) {
+    const maxIdx = trimmed.reduce(
+      (best, s, i) => (s.messages.length > trimmed[best].messages.length ? i : best),
+      0,
+    )
+    trimmed = trimmed.map((s, i) =>
+      i === maxIdx ? { ...s, messages: s.messages.slice(1) } : s,
+    )
     serialized = JSON.stringify(trimmed)
   }
+
   return serialized.length > MAX_STORED_BYTES ? null : serialized
 }
 
-// Header component - displays the app name, tagline, theme switcher, and new chat button
-function Header({ theme, onToggleTheme, onNewChat, hasMessages }) {
+// Trim history sent to the LLM to the last MAX_LLM_MESSAGES messages.
+// Full history is always kept locally; only the API payload is trimmed.
+// A leading system message (if any) is always preserved.
+function trimForLLM(messages) {
+  if (messages.length <= MAX_LLM_MESSAGES) return messages
+  const hasSystem = messages[0]?.role === 'system'
+  if (!hasSystem) return messages.slice(-MAX_LLM_MESSAGES)
+  const sys = messages[0]
+  const tail = messages.slice(-(MAX_LLM_MESSAGES - 1))
+  return [sys, ...tail]
+}
+
+// Header component
+function Header({ theme, onToggleTheme, onNewChat, hasMessages, onMenuToggle }) {
   const isDark = theme === 'dark'
 
   return (
     <header className="header">
       <div className="header__brand">
+        <button
+          className="sidebar-toggle-btn"
+          type="button"
+          onClick={onMenuToggle}
+          aria-label="Toggle chat sessions"
+          title="Chat sessions"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
         <span className="header__mark" aria-hidden="true">V</span>
         <div>
           <span className="header__title">Vani</span>
@@ -113,30 +212,28 @@ function Header({ theme, onToggleTheme, onNewChat, hasMessages }) {
   )
 }
 
-// Root App component — owns all shared state and the sendMessage logic
+// Initialise session data once at module level to avoid double-invocation
+// from React's StrictMode double-rendering of useState initialisers.
+const _init = getInitialSessions()
+
 export default function App() {
   const [theme, setTheme] = useState(getInitialTheme)
 
-  // messages: array of { role: "user" | "assistant", content: string, isError?: bool }
-  // Hydrated from localStorage on mount; persisted (debounced) on every change.
-  const [messages, setMessages] = useState(getInitialMessages)
+  const [sessions, setSessions] = useState(_init.sessions)
+  const [activeSessionId, setActiveSessionId] = useState(_init.activeId)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  // isLoading: true while awaiting a response from the backend
   const [isLoading, setIsLoading] = useState(false)
-
-  // isWakingUp: true if the backend hasn't responded within 5 seconds
-  // (Render free tier cold start can take 10–30s)
   const [isWakingUp, setIsWakingUp] = useState(false)
-
-  // lastUserMessage: kept so the retry button can re-send after an error
   const [lastUserMessage, setLastUserMessage] = useState(null)
-
-  // abortRef: holds the AbortController for the in-flight streaming turn so
-  // the Stop button can cancel it. Cleared in the finally block.
-  const abortRef = useRef(null)
-
-  // droppedFiles: files dropped on the chat window area, forwarded to ChatInput
   const [droppedFiles, setDroppedFiles] = useState(null)
+
+  const abortRef = useRef(null)
+  const persistTimerRef = useRef(null)
+
+  // Derive the active session's messages — not a separate state slice
+  const activeSession = sessions.find((s) => s.id === activeSessionId) ?? sessions[0]
+  const messages = activeSession?.messages ?? []
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -144,54 +241,121 @@ export default function App() {
     localStorage.setItem('vani-theme', theme)
   }, [theme])
 
-  // Persist messages to localStorage, debounced 500ms so we don't write on
-  // every streamed token. Skips bubbles flagged as transient errors and any
-  // empty assistant placeholder still being filled.
-  const persistTimerRef = useRef(null)
+  // Debounced persist: filter transient bubbles, then serialise all sessions
   useEffect(() => {
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
     persistTimerRef.current = setTimeout(() => {
-      const persistable = messages.filter(
-        (m) => !m.isError && !(m.role === 'assistant' && m.content === ''),
-      )
       try {
-        if (persistable.length === 0) {
-          localStorage.removeItem(MESSAGES_STORAGE_KEY)
-          return
+        const persistable = sessions.map((s) => ({
+          ...s,
+          messages: s.messages.filter(
+            (m) => !m.isError && !(m.role === 'assistant' && m.content === ''),
+          ),
+        }))
+        if (persistable.every((s) => s.messages.length === 0)) {
+          // Keep at least the session shells so the sidebar doesn't lose history
+          localStorage.setItem(SESSIONS_KEY, JSON.stringify(persistable))
+        } else {
+          const serialized = serializeSessionsForStorage(persistable)
+          if (serialized) localStorage.setItem(SESSIONS_KEY, serialized)
         }
-        const serialized = serializeForStorage(persistable)
-        if (serialized) localStorage.setItem(MESSAGES_STORAGE_KEY, serialized)
+        localStorage.setItem(ACTIVE_KEY, activeSessionId)
       } catch {
-        // QuotaExceeded or storage unavailable — drop silently rather than
-        // breaking the chat. Next successful write will catch up.
+        // QuotaExceeded — drop silently
       }
     }, 500)
-    return () => {
-      if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
-    }
-  }, [messages])
+    return () => clearTimeout(persistTimerRef.current)
+  }, [sessions, activeSessionId])
 
   function toggleTheme() {
-    setTheme((currentTheme) => currentTheme === 'dark' ? 'light' : 'dark')
+    setTheme((t) => (t === 'dark' ? 'light' : 'dark'))
+  }
+
+  // Update the messages of a specific session by ID.
+  // Using a captured session ID (not the live activeSessionId) prevents
+  // abort-cleanup from writing to the wrong session after a mid-stream switch.
+  function updateThisSession(updaterFn, sessionId) {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== sessionId) return s
+        const newMessages =
+          typeof updaterFn === 'function' ? updaterFn(s.messages) : updaterFn
+        return { ...s, messages: newMessages, updatedAt: Date.now() }
+      }),
+    )
+  }
+
+  // Auto-name a session from its first user message once, immediately after send.
+  function maybeAutoName(sessionId, msgs) {
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === sessionId && s.name === 'New chat'
+          ? { ...s, name: generateSessionName(msgs) }
+          : s,
+      ),
+    )
   }
 
   function newChat() {
-    if (!window.confirm('Start a new chat? This will clear the current conversation.')) return
     abortRef.current?.abort()
-    setMessages([])
+    const session = makeSession()
+    setSessions((prev) => {
+      const next = [...prev, session]
+      return next.length > MAX_SESSIONS ? next.slice(1) : next
+    })
+    setActiveSessionId(session.id)
     setLastUserMessage(null)
     setIsLoading(false)
     setIsWakingUp(false)
     setDroppedFiles(null)
-    localStorage.removeItem(MESSAGES_STORAGE_KEY)
+    setSidebarOpen(false)
   }
 
-  /**
-   * streamChat — opens an SSE stream against /chat/stream and invokes
-   * `onEvent` for each parsed event ({type: "model"|"delta"|"done"|"error", ...}).
-   * Resolves when the stream ends; throws on transport errors or terminal
-   * `error` events that arrive *before* any tokens.
-   */
+  function switchSession(id) {
+    if (id === activeSessionId) {
+      setSidebarOpen(false)
+      return
+    }
+    abortRef.current?.abort()
+    setIsLoading(false)
+    setIsWakingUp(false)
+    setLastUserMessage(null)
+    setDroppedFiles(null)
+    setActiveSessionId(id)
+    setSidebarOpen(false)
+  }
+
+  function deleteSession(id) {
+    setSessions((prev) => {
+      const next = prev.filter((s) => s.id !== id)
+      if (id === activeSessionId) {
+        if (next.length > 0) {
+          setActiveSessionId(next[next.length - 1].id)
+          return next
+        }
+        const fresh = makeSession()
+        setActiveSessionId(fresh.id)
+        return [fresh]
+      }
+      if (next.length === 0) {
+        const fresh = makeSession()
+        setActiveSessionId(fresh.id)
+        return [fresh]
+      }
+      return next
+    })
+  }
+
+  function renameSession(id, name) {
+    const trimmed = name.trim().slice(0, 60)
+    if (!trimmed) return
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === id ? { ...s, name: trimmed, updatedAt: Date.now() } : s,
+      ),
+    )
+  }
+
   async function streamChat(payload, onEvent, signal) {
     const response = await fetch(`${API_URL}/chat/stream`, {
       method: 'POST',
@@ -214,8 +378,6 @@ export default function App() {
       if (done) break
       buffer += decoder.decode(value, { stream: true })
 
-      // SSE events are separated by a blank line. Each event has one or more
-      // `data: ...` lines we need to concatenate before JSON-parsing.
       let sep
       while ((sep = buffer.indexOf('\n\n')) !== -1) {
         const rawEvent = buffer.slice(0, sep)
@@ -243,39 +405,33 @@ export default function App() {
     }
   }
 
-  /**
-   * runStreamingTurn — shared flow for both first-send and retry. Appends an
-   * empty assistant placeholder, then mutates it in place as SSE deltas arrive.
-   */
   async function runStreamingTurn(history) {
+    // Capture the session this turn belongs to so abort cleanup writes to
+    // the correct session even if the user switches away mid-stream.
+    const sessionIdForThisTurn = activeSessionId
+
     setIsLoading(true)
     setIsWakingUp(false)
 
-    // One AbortController per turn. The Stop button calls .abort() on this.
     const controller = new AbortController()
     abortRef.current = controller
 
-    // If backend hasn't started streaming in 5s, show the waking-up banner
     const wakeupTimer = setTimeout(() => setIsWakingUp(true), 5000)
 
-    // Append an empty assistant bubble we'll fill as tokens arrive. Tracking
-    // by index works because nothing else mutates messages during a turn.
     const assistantIndex = history.length
-    setMessages([...history, { role: 'assistant', content: '', modelUsed: null }])
+    updateThisSession(
+      [...history, { role: 'assistant', content: '', modelUsed: null }],
+      sessionIdForThisTurn,
+    )
 
     const updateAssistant = (patch) => {
-      setMessages((prev) => {
+      updateThisSession((prev) => {
         const next = [...prev]
         next[assistantIndex] = { ...next[assistantIndex], ...patch }
         return next
-      })
+      }, sessionIdForThisTurn)
     }
 
-    // Coalesce streaming tokens with requestAnimationFrame so we render at
-    // most once per frame (~60 fps) instead of once per token (which on
-    // Groq is 30–80 tokens/sec). Without this, ReactMarkdown + KaTeX +
-    // SyntaxHighlighter re-parse the full message on every token, causing
-    // visible layout jitter.
     let pendingChunk = ''
     let flushScheduled = false
 
@@ -284,12 +440,12 @@ export default function App() {
       if (!pendingChunk) return
       const chunk = pendingChunk
       pendingChunk = ''
-      setMessages((prev) => {
+      updateThisSession((prev) => {
         const next = [...prev]
         const current = next[assistantIndex]
         next[assistantIndex] = { ...current, content: current.content + chunk }
         return next
-      })
+      }, sessionIdForThisTurn)
     }
 
     const appendDelta = (chunk) => {
@@ -300,8 +456,6 @@ export default function App() {
       }
     }
 
-    // Force a final flush after the stream completes so the last few tokens
-    // (which may arrive too late for an rAF tick) actually render.
     const finalFlush = () => {
       if (pendingChunk) flushPending()
     }
@@ -310,10 +464,9 @@ export default function App() {
     let midStreamError = null
 
     try {
-      // Transparent retry only applies before the first token. Once tokens
-      // start flowing we keep whatever we got rather than restarting.
+      // Only the LLM payload is trimmed — the full history is kept locally
       const attempt = () =>
-        streamChat({ messages: history }, (event) => {
+        streamChat({ messages: trimForLLM(history) }, (event) => {
           if (event.type === 'model') {
             updateAssistant({ modelUsed: event.model })
           } else if (event.type === 'delta') {
@@ -324,7 +477,6 @@ export default function App() {
             }
             appendDelta(event.content)
           } else if (event.type === 'error') {
-            // Only reachable mid-stream — pre-token errors throw inside streamChat.
             midStreamError = event.message
           }
         }, controller.signal)
@@ -332,7 +484,6 @@ export default function App() {
       try {
         await attempt()
       } catch (firstErr) {
-        // Don't auto-retry a user-initiated abort.
         if (controller.signal.aborted) throw firstErr
         if (firstTokenSeen) throw firstErr
         await new Promise((r) => setTimeout(r, 800))
@@ -340,31 +491,24 @@ export default function App() {
       }
 
       if (midStreamError) {
-        // Stream cut off after partial output — append a note rather than
-        // wiping what the user already saw.
         appendDelta(`\n\n_(stream interrupted: ${midStreamError})_`)
       }
     } catch (err) {
-      // User clicked Stop. Keep whatever partial reply we have; just append
-      // a small marker so it's clear the response was cut short. If no token
-      // ever arrived, replace the empty placeholder with a neutral note
-      // rather than an error bubble (this wasn't a failure).
       if (controller.signal.aborted || err.name === 'AbortError') {
         if (firstTokenSeen) {
           appendDelta('\n\n_(stopped)_')
         } else {
-          setMessages((prev) => {
+          updateThisSession((prev) => {
             const next = [...prev]
             next[assistantIndex] = {
               role: 'assistant',
               content: '_(stopped before any reply)_',
             }
             return next
-          })
+          }, sessionIdForThisTurn)
         }
       } else {
-        // No tokens ever arrived — replace the empty placeholder with an error bubble.
-        setMessages((prev) => {
+        updateThisSession((prev) => {
           const next = [...prev]
           next[assistantIndex] = {
             role: 'assistant',
@@ -372,13 +516,9 @@ export default function App() {
             isError: true,
           }
           return next
-        })
+        }, sessionIdForThisTurn)
       }
     } finally {
-      // Flush any tokens that were buffered between the last rAF tick and
-      // stream end, so the final words actually appear. Safe even after
-      // abort: flushPending no-ops on empty pendingChunk and setMessages
-      // simply re-renders the bubble we already have.
       finalFlush()
       clearTimeout(wakeupTimer)
       abortRef.current = null
@@ -387,15 +527,10 @@ export default function App() {
     }
   }
 
-  // stopGeneration — invoked by the Stop button in ChatWindow. Aborts the
-  // in-flight fetch; runStreamingTurn's catch block keeps the partial reply.
   function stopGeneration() {
     abortRef.current?.abort()
   }
 
-  // buildUserContent — turns text + images into either a plain string (no
-  // images) or an OpenAI-style multipart array that the backend forwards to
-  // vision-capable models.
   function buildUserContent(text, images) {
     if (!images || images.length === 0) return text
     const parts = []
@@ -410,78 +545,98 @@ export default function App() {
     const content = buildUserContent(userText, images)
     const userMsg = { role: 'user', content, images }
     const nextMessages = [...messages, userMsg]
-    setMessages(nextMessages)
+    updateThisSession(nextMessages, activeSessionId)
     setLastUserMessage(userText)
+    // Auto-name from first user message
+    if (!messages.some((m) => m.role === 'user')) {
+      maybeAutoName(activeSessionId, nextMessages)
+    }
     await runStreamingTurn(nextMessages)
   }
 
-  // regenerate — drop the last assistant reply and re-run the turn with the
-  // same history, so the user gets a fresh response without re-typing.
   function regenerate() {
-    setMessages((prev) => {
-      let trimmed = [...prev]
-      // Drop the trailing assistant bubble (the one being regenerated).
-      if (trimmed.length && trimmed[trimmed.length - 1].role === 'assistant') {
-        trimmed = trimmed.slice(0, -1)
-      }
-      runStreamingTurn(trimmed)
-      return trimmed
-    })
+    const capturedId = activeSessionId
+    const currentMsgs = sessions.find((s) => s.id === capturedId)?.messages ?? []
+    let trimmed = [...currentMsgs]
+    if (trimmed.length && trimmed[trimmed.length - 1].role === 'assistant') {
+      trimmed = trimmed.slice(0, -1)
+    }
+    updateThisSession(trimmed, capturedId)
+    runStreamingTurn(trimmed)
   }
 
-  // editAndResend — splice history to the given index (inclusive), replace
-  // that user message with the edited text, then re-run the streaming turn.
-  // Edited messages drop the original images (text-only edit for simplicity).
   async function editAndResend(index, newText) {
     const sliced = messages.slice(0, index)
     const editedMsg = { role: 'user', content: newText }
     const nextMessages = [...sliced, editedMsg]
-    setMessages(nextMessages)
+    updateThisSession(nextMessages, activeSessionId)
     setLastUserMessage(newText)
     await runStreamingTurn(nextMessages)
   }
 
-  /**
-   * handleRetry — strips the trailing error bubble (and its triggering user
-   * message) and re-runs the turn with the last user text.
-   */
   function handleRetry() {
     if (!lastUserMessage) return
-    setMessages((prev) => {
-      // Drop trailing error bubble + the user message that produced it
-      let trimmed = prev
-      if (trimmed.length && trimmed[trimmed.length - 1].isError) {
-        trimmed = trimmed.slice(0, -1)
-      }
-      if (trimmed.length && trimmed[trimmed.length - 1].role === 'user') {
-        trimmed = trimmed.slice(0, -1)
-      }
-      const nextMessages = [...trimmed, { role: 'user', content: lastUserMessage }]
-      // Kick off the streaming turn after state settles
-      runStreamingTurn(nextMessages)
-      return nextMessages
-    })
+    const capturedId = activeSessionId
+    const currentMsgs = sessions.find((s) => s.id === capturedId)?.messages ?? []
+    let trimmed = [...currentMsgs]
+    if (trimmed.length && trimmed[trimmed.length - 1].isError) {
+      trimmed = trimmed.slice(0, -1)
+    }
+    if (trimmed.length && trimmed[trimmed.length - 1].role === 'user') {
+      trimmed = trimmed.slice(0, -1)
+    }
+    const nextMessages = [...trimmed, { role: 'user', content: lastUserMessage }]
+    updateThisSession(nextMessages, capturedId)
+    runStreamingTurn(nextMessages)
   }
 
   return (
-    <div className="app">
-      <Header theme={theme} onToggleTheme={toggleTheme} onNewChat={newChat} hasMessages={messages.length > 0} />
-      <ChatWindow
-        messages={messages}
-        isLoading={isLoading}
-        isWakingUp={isWakingUp}
-        onRetry={handleRetry}
-        onStop={stopGeneration}
-        onEditAndResend={editAndResend}
-        onRegenerate={regenerate}
-        onDropFiles={setDroppedFiles}
+    <div className="app-shell">
+      {sidebarOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      <Sidebar
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        isOpen={sidebarOpen}
+        onNewChat={newChat}
+        onSwitch={switchSession}
+        onDelete={deleteSession}
+        onRename={renameSession}
+        onClose={() => setSidebarOpen(false)}
       />
-      <ChatInput
-        onSend={sendMessage}
-        disabled={isLoading}
-        droppedFiles={droppedFiles}
-        onDropConsumed={() => setDroppedFiles(null)}
-      />
+
+      <div className="app">
+        <Header
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onNewChat={newChat}
+          hasMessages={messages.length > 0}
+          onMenuToggle={() => setSidebarOpen((v) => !v)}
+        />
+        <ChatWindow
+          key={activeSessionId}
+          messages={messages}
+          isLoading={isLoading}
+          isWakingUp={isWakingUp}
+          onRetry={handleRetry}
+          onStop={stopGeneration}
+          onEditAndResend={editAndResend}
+          onRegenerate={regenerate}
+          onDropFiles={setDroppedFiles}
+        />
+        <ChatInput
+          onSend={sendMessage}
+          disabled={isLoading}
+          droppedFiles={droppedFiles}
+          onDropConsumed={() => setDroppedFiles(null)}
+        />
+      </div>
     </div>
   )
 }

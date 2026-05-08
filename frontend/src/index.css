@@ -86,6 +86,19 @@ body {
 
 #root {
   display: flex;
+  justify-content: center;
+}
+
+/* Outer shell that holds sidebar + main column side by side */
+.app-shell {
+  display: flex;
+  width: 100%;
+  max-width: 1240px;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  position: relative;
+  box-shadow: var(--shadow-soft);
 }
 
 button,
@@ -100,15 +113,13 @@ button {
 .app {
   display: flex;
   flex-direction: column;
-  width: min(100%, 980px);
-  /* dvh = dynamic viewport height — correctly excludes iOS toolbars/dynamic island */
+  flex: 1;
+  min-width: 0;
   height: 100dvh;
   max-height: 100dvh;
-  margin: 0 auto;
   background: var(--surface);
   border-left: 1px solid var(--border);
   border-right: 1px solid var(--border);
-  box-shadow: var(--shadow-soft);
   backdrop-filter: blur(22px);
   overflow: hidden;
 }
@@ -1327,6 +1338,8 @@ button {
   .app {
     width: 100%;
     border: none;
+    border-left: none;
+    border-right: none;
   }
 
   .header {
@@ -1381,6 +1394,270 @@ button {
     padding: 0 18px;
   }
 }
+
+/* ─── Sidebar ──────────────────────────────────────────────── */
+
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-strong);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 14px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sidebar__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sidebar__new-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.sidebar__new-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.sidebar__new-btn:focus-visible {
+  outline: 3px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+
+.sidebar__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+  list-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.sidebar__list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar__list::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+
+.sidebar__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 1px 6px;
+  border-radius: 8px;
+  transition: background-color 0.15s ease;
+}
+
+.sidebar__item:hover {
+  background: var(--accent-soft);
+}
+
+.sidebar__item--active {
+  background: var(--accent-soft);
+}
+
+.sidebar__item--active .sidebar__item-name {
+  color: var(--accent);
+}
+
+.sidebar__item-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 9px 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar__item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  max-width: 160px;
+}
+
+.sidebar__item-date {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.sidebar__item-actions {
+  display: flex;
+  gap: 2px;
+  padding-right: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.sidebar__item:hover .sidebar__item-actions,
+.sidebar__item--active .sidebar__item-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .sidebar__item-actions {
+    opacity: 1;
+  }
+}
+
+.sidebar__action-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.sidebar__action-btn:hover {
+  background: var(--surface-muted);
+  color: var(--text-primary);
+}
+
+.sidebar__action-btn--danger:hover {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.sidebar__action-btn:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+.sidebar__rename-input {
+  flex: 1;
+  margin: 4px 0 4px 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1.5px solid var(--accent);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  min-width: 0;
+}
+
+/* ─── Sidebar mobile overlay ────────────────────────────────── */
+
+.sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 100;
+    width: 280px;
+    transform: translateX(-100%);
+    transition: transform 0.24s ease;
+    box-shadow: var(--shadow-soft);
+  }
+
+  .sidebar--open {
+    transform: translateX(0);
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(2px);
+    animation: sidebar-fade-in 0.2s ease;
+  }
+
+  @keyframes sidebar-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+}
+
+/* ─── Hamburger toggle (Header) ─────────────────────────────── */
+
+.sidebar-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+  margin-right: 4px;
+}
+
+.sidebar-toggle-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.sidebar-toggle-btn:focus-visible {
+  outline: 3px solid var(--accent-soft);
+  outline-offset: 3px;
+}
+
+/* Hide toggle on desktop — sidebar is always visible */
+@media (min-width: 768px) {
+  .sidebar-toggle-btn {
+    display: none;
+  }
+}
+
+/* ─── End sidebar ────────────────────────────────────────────── */
 
 @media (max-width: 420px) {
   .header__tagline {
